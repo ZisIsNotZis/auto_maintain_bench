@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
+from harness.framework_adapters import FRAMEWORK_ADAPTERS, get_adapter
 from harness.runner import run_benchmark
 
 
@@ -34,6 +35,7 @@ def main() -> None:
     parser.add_argument("--base-url", default=None, help="OpenAI-compatible base URL for llama-server, e.g. http://127.0.0.1:8091/v1")
     parser.add_argument("--model", default=None, help="Model name/path for llama-server")
     parser.add_argument("--prompt-style", default="strict_json", choices=["strict_json", "ops_playbook", "minimal"])
+    parser.add_argument("--adapter", default=None, choices=sorted(FRAMEWORK_ADAPTERS))
     parser.add_argument(
         "--harness-profile",
         default="llama_cpp_agent_style",
@@ -46,6 +48,13 @@ def main() -> None:
     parser.add_argument("--recovery-mode", default="heuristic", choices=["heuristic", "none"])
     parser.add_argument("--debug-prompts", action="store_true")
     args = parser.parse_args()
+    if args.adapter:
+        spec = get_adapter(args.adapter)
+        args.prompt_style = spec.prompt_style
+        args.harness_profile = spec.harness_profile
+        args.tool_mode = spec.tool_mode
+        args.memory_mode = spec.memory_mode
+        args.recovery_mode = spec.recovery_mode
 
     result = run_benchmark(
         scenarios_dir=Path(args.scenarios_dir),
@@ -62,6 +71,7 @@ def main() -> None:
         max_tokens=args.max_tokens,
         recovery_mode=args.recovery_mode,
         debug_prompts=args.debug_prompts,
+        adapter_name=args.adapter or args.harness_profile,
     )
     print(f"overall_score={result['summary']['overall_score']}")
     print(f"saved={Path(args.output).resolve()}")

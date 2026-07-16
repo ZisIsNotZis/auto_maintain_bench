@@ -47,6 +47,7 @@ def run_benchmark(
     max_tokens: int = 220,
     recovery_mode: str = "heuristic",
     debug_prompts: bool = False,
+    adapter_name: str = "baseline_rule",
 ) -> dict[str, Any]:
     started = time.time()
     scenarios = load_scenarios(scenarios_dir)
@@ -198,6 +199,7 @@ def run_benchmark(
             "max_tokens": max_tokens,
             "recovery_mode": recovery_mode,
             "debug_prompts": debug_prompts,
+            "adapter_name": adapter_name,
         },
         "summary": summary,
         "by_category": by_category,

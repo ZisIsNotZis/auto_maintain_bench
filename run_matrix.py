@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+from harness.framework_adapters import get_adapter
 from harness.runner import run_benchmark
 
 
@@ -39,6 +40,8 @@ def main() -> None:
     results: list[dict[str, Any]] = []
     for combo in combos:
         name = str(combo.get("name", "unnamed"))
+        adapter_name = str(combo.get("adapter", name))
+        adapter = get_adapter(adapter_name)
         output_path = _resolve_path(str(combo.get("output") or f"reports/{name}.json"))
         result = run_benchmark(
             scenarios_dir=_resolve_path(args.scenarios_dir),
@@ -47,18 +50,21 @@ def main() -> None:
             agent_mode="llama_json",
             base_url=args.base_url,
             model=args.model,
-            prompt_style=str(combo.get("prompt_style", "strict_json")),
-            harness_profile=str(combo.get("harness_profile", "llama_cpp_agent_style")),
-            tool_mode=str(combo.get("tool_mode", "all")),
-            memory_mode=str(combo.get("memory_mode", "none")),
+            prompt_style=str(combo.get("prompt_style", adapter.prompt_style)),
+            harness_profile=str(combo.get("harness_profile", adapter.harness_profile)),
+            tool_mode=str(combo.get("tool_mode", adapter.tool_mode)),
+            memory_mode=str(combo.get("memory_mode", adapter.memory_mode)),
             timeout_s=float(combo.get("timeout_s", 180.0)),
             max_tokens=int(combo.get("max_tokens", 220)),
-            recovery_mode=str(combo.get("recovery_mode", "heuristic")),
+            recovery_mode=str(combo.get("recovery_mode", adapter.recovery_mode)),
             debug_prompts=bool(combo.get("debug_prompts", False)),
+            adapter_name=adapter_name,
         )
         results.append(
             {
                 "name": name,
+                "adapter": adapter_name,
+                "adapter_description": adapter.description,
                 "output": str(output_path),
                 "overall_score": result["summary"]["overall_score"],
                 "detection_score": result["summary"]["detection_score"],

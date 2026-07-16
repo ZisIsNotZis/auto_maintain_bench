@@ -22,8 +22,13 @@
   - deterministic guardrail recovery added for obvious edge maintenance incidents
   - regression tests added for baseline quality and empty-content recovery
 - Next:
-  - add true external framework adapters instead of profile-only simulations
+  - add true external framework adapters instead of policy-only simulations
   - add grammar-constrained llama.cpp mode to reduce guardrail dependence
+- ✅ Framework-independent conversation adapter layer added.
+- ✅ Named adapter policies added for `llama_cpp_agent`, `smolagents`, `tinyagent`, plus `pure_llama_json` control.
+- ✅ Tested adapter matrix with two CPU-only llama-server models (`-ngl 0`):
+  - MiniCPM5-1B-Q4_K_M
+  - Qwen3.5-0.8B-UD-IQ3_XXS (closest local Qwen-family tiny GGUF; exact Qwen3.5-0.6B GGUF not found locally or via `hf models search`)
 
 ## Goal
 

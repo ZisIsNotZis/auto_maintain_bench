@@ -5,6 +5,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
+from harness.framework_adapters import get_adapter
 from harness.runner import run_benchmark
 from harness.llm_agent import LlamaJSONAgent
 
@@ -53,6 +54,16 @@ class BenchmarkRegressionTests(unittest.TestCase):
         self.assertGreater(result["efficiency"]["mean_tool_calls"], 0)
         self.assertTrue(any(r["agent_meta"]["malformed_output"] for r in result["records"]))
         self.assertTrue(any(r["agent_meta"]["recovery_applied"] for r in result["records"]))
+
+    def test_framework_adapter_specs_are_distinct_and_named(self) -> None:
+        llama = get_adapter("llama_cpp_agent")
+        smol = get_adapter("smolagents")
+        tiny = get_adapter("tinyagent")
+
+        self.assertEqual(llama.prompt_style, "strict_json")
+        self.assertEqual(smol.prompt_style, "ops_playbook")
+        self.assertEqual(tiny.prompt_style, "minimal")
+        self.assertEqual(tiny.tool_mode, "retrieval")
 
 
 if __name__ == "__main__":

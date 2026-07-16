@@ -28,6 +28,8 @@ Implemented:
 - deterministic scoring engine
 - baseline non-LLM rule agent
 - llama-server JSON agent adapter (`llama_json`)
+- framework-independent conversation adapter layer
+- named adapter policies: `llama_cpp_agent`, `smolagents`, `tinyagent`, `pure_llama_json`
 - matrix runner for harness/model/prompt combos
 
 ## Repository layout
@@ -47,6 +49,12 @@ auto_maintain_bench/
 
 ## Quick start
 
+Start a CPU-only `llama-server` with `-ngl 0`:
+
+```bash
+PORT=8091 ./scripts/start_llama_server.sh /path/to/model.gguf
+```
+
 ### 1) Run deterministic baseline (no LLM)
 
 ```bash
@@ -60,12 +68,9 @@ python3 auto_maintain_bench/run.py \
 ```bash
 python3 auto_maintain_bench/run.py \
   --agent-mode llama_json \
+  --adapter llama_cpp_agent \
   --base-url http://127.0.0.1:8091/v1 \
   --model /home/z/hf/models--openbmb--MiniCPM5-1B-GGUF/snapshots/87007042419d30c1d8f38ef065424ee33870831e/MiniCPM5-1B-Q4_K_M.gguf \
-  --prompt-style strict_json \
-  --harness-profile llama_cpp_agent_style \
-  --tool-mode retrieval \
-  --memory-mode rolling \
   --max-rounds 1 \
   --output auto_maintain_bench/reports/examples/single_probe.json
 ```
@@ -94,18 +99,36 @@ Results:
 
 | Combo | Overall | Detection | Analysis | Resolution | Safety | Durability | Mean detect round | Mean tool calls | Malformed output rate | Recovery rate |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| `pure_llama_json__strict_json__retrieval` | 18.33 | 2.0 | 3.0 | 7.67 | 4.67 | 4.33 | null | 0.0 | 1.0 | 0.0 |
-| `llama_cpp_agent_style__strict_json__retrieval` | 91.67 | 25.0 | 25.0 | 23.33 | 7.33 | 11.0 | 0 | 2.67 | 1.0 | 1.0 |
-| `smolagents_style__ops_playbook__all` | 91.67 | 25.0 | 25.0 | 23.33 | 7.33 | 11.0 | 0 | 2.67 | 1.0 | 1.0 |
-| `tinyagent_style__minimal__retrieval` | 91.67 | 25.0 | 25.0 | 23.33 | 7.33 | 11.0 | 0 | 2.67 | 1.0 | 1.0 |
+| `pure_llama_json` | 18.33 | 2.0 | 3.0 | 7.67 | 4.67 | 4.33 | null | 0.0 | 1.0 | 0.0 |
+| `llama_cpp_agent` | 91.67 | 25.0 | 25.0 | 23.33 | 7.33 | 11.0 | 0 | 2.67 | 1.0 | 1.0 |
+| `smolagents` | 91.67 | 25.0 | 25.0 | 23.33 | 7.33 | 11.0 | 0 | 2.67 | 1.0 | 1.0 |
+| `tinyagent` | 91.67 | 25.0 | 25.0 | 23.33 | 7.33 | 11.0 | 0 | 2.67 | 1.0 | 1.0 |
+
+Two-model run (`-ngl 0` CPU-only llama-server instances):
+
+| Model | Adapter | Overall | Mean detect round | Mean tool calls | Malformed output rate | Recovery rate |
+|---|---|---:|---:|---:|---:|---:|
+| MiniCPM5-1B-Q4_K_M | `pure_llama_json` | 18.33 | null | 0.0 | 1.0 | 0.0 |
+| MiniCPM5-1B-Q4_K_M | `llama_cpp_agent` | 91.67 | 0 | 2.67 | 1.0 | 1.0 |
+| MiniCPM5-1B-Q4_K_M | `smolagents` | 91.67 | 0 | 2.67 | 1.0 | 1.0 |
+| MiniCPM5-1B-Q4_K_M | `tinyagent` | 91.67 | 0 | 2.67 | 1.0 | 1.0 |
+| Qwen3.5-0.8B-UD-IQ3_XXS | `pure_llama_json` | 18.33 | null | 0.0 | 1.0 | 0.0 |
+| Qwen3.5-0.8B-UD-IQ3_XXS | `llama_cpp_agent` | 91.67 | 0 | 2.67 | 1.0 | 1.0 |
+| Qwen3.5-0.8B-UD-IQ3_XXS | `smolagents` | 91.67 | 0 | 2.67 | 1.0 | 1.0 |
+| Qwen3.5-0.8B-UD-IQ3_XXS | `tinyagent` | 91.67 | 0 | 2.67 | 1.0 | 1.0 |
+
+Note: Qwen3.5-0.6B GGUF was requested, but no exact local or `hf models search` match was found in this environment. The run uses the closest local Qwen-family tiny model available: `Qwen3.5-0.8B-UD-IQ3_XXS.gguf`.
 
 Source files:
 
 - `reports/examples/doubao_example_matrix.json`
-- `reports/examples/pure_llama_json__strict_json__retrieval.json`
-- `reports/examples/llama_cpp_agent_style__strict_json__retrieval.json`
-- `reports/examples/smolagents_style__ops_playbook__all.json`
-- `reports/examples/tinyagent_style__minimal__retrieval.json`
+- `reports/examples/matrix_minicpm5_1b.json`
+- `reports/examples/matrix_qwen35_08b.json`
+- `reports/examples/two_model_adapter_summary.json`
+- `reports/examples/pure_llama_json.json`
+- `reports/examples/llama_cpp_agent.json`
+- `reports/examples/smolagents.json`
+- `reports/examples/tinyagent.json`
 - `reports/examples/debug_after_fix.json`
 
 ## What these results mean
@@ -126,23 +149,25 @@ The guarded agent profiles recover with deterministic maintenance guardrails:
 - safe bounded tools execute (`mean_tool_calls = 2.67`)
 - overall score reaches `91.67`
 
-This does **not** mean the three external frameworks have been fully integrated or compared. It means the current harness can now separately measure:
+The named framework adapters share a framework-independent conversation loop and differ by adapter policy:
 
-1. raw model structured-action reliability (`pure_llama_json...`)
+- `llama_cpp_agent`: strict JSON, retrieved tools, rolling memory, recovery guardrails.
+- `smolagents`: SRE playbook prompt, all tools exposed, no rolling memory, recovery guardrails.
+- `tinyagent`: shortest prompt, retrieved tools, rolling compact memory, recovery guardrails.
+
+This is not yet a native import of each upstream framework library. It is the intended first layer: a conversation-based adapter abstraction that can later be backed by each framework's own command/runtime while preserving the same benchmark protocol.
+
+The current results separately measure:
+
+1. raw model structured-action reliability (`pure_llama_json`)
 2. agent-harness robustness when malformed tiny-model output is guarded/recovered
 3. whether the resulting actions actually fix the simulated artifact and preserve regression checks
 
 ## Notes on the "doubao-inspired" combos
 
-`configs/doubao_example_combos.json` uses **harness profiles inspired by** the recommendation families in `doubao_suggestion.md`:
+`configs/doubao_example_combos.json` uses named adapter policies inspired by the recommendation families in `doubao_suggestion.md`: `llama_cpp_agent`, `smolagents`, and `tinyagent`.
 
-- `llama_cpp_agent_style`
-- `smolagents_style`
-- `tinyagent_style`
-
-These are benchmark adapter profiles, not full external framework integrations yet.
-
-Because all three guarded profiles currently use the same deterministic recovery layer, their scores are expected to match. Real framework adapters should later be plugged in under `harness/` or `adapters/` so their differences are measured directly.
+Because all three guarded adapters currently share the same deterministic recovery layer and the same three quick scenarios, their scores are expected to match. Native framework backends should later be plugged in under the adapter interface so command-line/runtime differences are measured directly.
 
 ## License
 
