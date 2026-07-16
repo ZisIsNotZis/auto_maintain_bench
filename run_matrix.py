@@ -29,6 +29,11 @@ def main() -> None:
     parser.add_argument("--base-url", required=True, help="llama-server base URL, e.g. http://127.0.0.1:8091/v1")
     parser.add_argument("--model", required=True, help="llama-server model name/path")
     parser.add_argument("--output", default="reports/doubao_example_matrix.json")
+    parser.add_argument(
+        "--combo-output-tag",
+        default=None,
+        help="Optional tag inserted into each combo output filename (e.g. minicpm, qwen35_08b)",
+    )
     parser.add_argument("--max-rounds", type=int, default=None)
     args = parser.parse_args()
 
@@ -43,6 +48,9 @@ def main() -> None:
         adapter_name = str(combo.get("adapter", name))
         adapter = get_adapter(adapter_name)
         output_path = _resolve_path(str(combo.get("output") or f"reports/{name}.json"))
+        if args.combo_output_tag:
+            stem = output_path.stem
+            output_path = output_path.with_name(f"{stem}__{args.combo_output_tag}{output_path.suffix}")
         result = run_benchmark(
             scenarios_dir=_resolve_path(args.scenarios_dir),
             output_path=output_path,

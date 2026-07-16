@@ -83,8 +83,11 @@ python3 auto_maintain_bench/run_matrix.py \
   --model /home/z/hf/models--openbmb--MiniCPM5-1B-GGUF/snapshots/87007042419d30c1d8f38ef065424ee33870831e/MiniCPM5-1B-Q4_K_M.gguf \
   --scenarios-dir auto_maintain_bench/scenarios/examples \
   --output auto_maintain_bench/reports/examples/doubao_example_matrix.json \
+  --combo-output-tag minicpm5_1b \
   --max-rounds 1
 ```
+
+Use different `--combo-output-tag` values per model run to avoid per-combo trace file overwrite.
 
 ## Example benchmark results
 
