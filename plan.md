@@ -29,6 +29,15 @@
 - ✅ Tested adapter matrix with two CPU-only llama-server models (`-ngl 0`):
   - MiniCPM5-1B-Q4_K_M
   - Qwen3.5-0.8B-UD-IQ3_XXS (closest local Qwen-family tiny GGUF; exact Qwen3.5-0.6B GGUF not found locally or via `hf models search`)
+- ✅ Maximal scenario planning added:
+  - `docs/scenario_catalog.md` enumerates 180 diverse candidate scenarios with significance, difficulty, max score class, and implementation notes.
+  - `docs/scoring_rubric.md` defines the deterministic score formula, max-score classes, safety caps, and category-specific scoring rules.
+
+## Planning Documents
+
+- `docs/scenario_catalog.md` is the implementation handoff catalog. Use it to choose and implement new benchmark scenarios.
+- `docs/scoring_rubric.md` is the source of truth for scoring design. Use it when adding new validators or max-score classes.
+- This `plan.md` remains the high-level architecture/status document.
 
 ## Goal
 
