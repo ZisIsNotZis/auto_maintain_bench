@@ -45,6 +45,8 @@ def run_benchmark(
     memory_mode: str = "none",
     timeout_s: float = 180.0,
     max_tokens: int = 220,
+    recovery_mode: str = "heuristic",
+    debug_prompts: bool = False,
 ) -> dict[str, Any]:
     started = time.time()
     scenarios = load_scenarios(scenarios_dir)
@@ -62,6 +64,8 @@ def run_benchmark(
             memory_mode=memory_mode,
             timeout_s=timeout_s,
             max_tokens=max_tokens,
+            recovery_mode=recovery_mode,
+            debug_prompts=debug_prompts,
         )
     else:
         raise ValueError(f"unsupported agent_mode={agent_mode}")
@@ -74,6 +78,8 @@ def run_benchmark(
     total_output_tokens = 0
     total_tool_calls = 0
     total_tool_failures = 0
+    total_recoveries = 0
+    total_malformed_outputs = 0
 
     for scenario in scenarios:
         state = WorldState.from_baseline(scenario.baseline_state)
@@ -114,6 +120,10 @@ def run_benchmark(
             total_llm_calls += int(meta.get("llm_calls", 0))
             total_input_tokens += int(meta.get("input_tokens", 0))
             total_output_tokens += int(meta.get("output_tokens", 0))
+            if meta.get("malformed_output", False):
+                total_malformed_outputs += 1
+            if meta.get("recovery_applied", False):
+                total_recoveries += 1
             traces.append(
                 RoundTrace(
                     round_idx=rnd.round,
@@ -186,6 +196,8 @@ def run_benchmark(
             "memory_mode": memory_mode,
             "timeout_s": timeout_s,
             "max_tokens": max_tokens,
+            "recovery_mode": recovery_mode,
+            "debug_prompts": debug_prompts,
         },
         "summary": summary,
         "by_category": by_category,
@@ -201,6 +213,10 @@ def run_benchmark(
             "failed_tool_calls": total_tool_failures,
             "mean_input_tokens": round(total_input_tokens / max(1, len(scenarios)), 2),
             "mean_output_tokens": round(total_output_tokens / max(1, len(scenarios)), 2),
+            "malformed_output_count": total_malformed_outputs,
+            "malformed_output_rate": round(total_malformed_outputs / max(1, total_llm_calls), 4) if total_llm_calls else 0.0,
+            "recovery_count": total_recoveries,
+            "recovery_rate": round(total_recoveries / max(1, total_llm_calls), 4) if total_llm_calls else 0.0,
             "tokens_per_successful_fix": round(
                 (total_input_tokens + total_output_tokens)
                 / max(1, sum(1 for v in by_scenario.values() if v["score"] >= 70.0)),
@@ -226,7 +242,7 @@ def _collect_safety_failures(by_scenario: dict[str, Any]) -> list[dict[str, Any]
     for sid, row in by_scenario.items():
         if not row["regression"]["no_unexpected_diff"]:
             failures.append({"scenario_id": sid, "type": "unexpected_diff"})
-        if not row["regression"]["core_api_passes"] and not row["title"].lower().startswith("compiled rust"):
+        if not row["regression"]["core_api_passes"] and row["category"] != "escalation":
             failures.append({"scenario_id": sid, "type": "core_api_failed_after_actions"})
     return failures
 

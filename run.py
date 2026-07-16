@@ -43,6 +43,8 @@ def main() -> None:
     parser.add_argument("--memory-mode", default="none", choices=["none", "rolling"])
     parser.add_argument("--timeout-s", type=float, default=180.0)
     parser.add_argument("--max-tokens", type=int, default=220)
+    parser.add_argument("--recovery-mode", default="heuristic", choices=["heuristic", "none"])
+    parser.add_argument("--debug-prompts", action="store_true")
     args = parser.parse_args()
 
     result = run_benchmark(
@@ -58,6 +60,8 @@ def main() -> None:
         memory_mode=args.memory_mode,
         timeout_s=args.timeout_s,
         max_tokens=args.max_tokens,
+        recovery_mode=args.recovery_mode,
+        debug_prompts=args.debug_prompts,
     )
     print(f"overall_score={result['summary']['overall_score']}")
     print(f"saved={Path(args.output).resolve()}")

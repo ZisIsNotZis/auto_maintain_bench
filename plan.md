@@ -11,10 +11,19 @@
   - baseline non-LLM rule agent
   - CLI runner and JSON reports
 - ✅ Initial phase1 scenario pack added.
-- 🔄 In progress:
-  - llama-server based LLM adapter (`llama_json`)
-  - combo matrix runner for framework/model/prompt examples from `doubao_suggestion.md`
-  - repository standardization and public publish flow
+- ✅ llama-server based LLM adapter (`llama_json`)
+- ✅ combo matrix runner for framework/model/prompt examples from `doubao_suggestion.md`
+- ✅ repository standardization and public publish flow
+- ✅ Investigation of identical/low example results:
+  - pure llama JSON adapter failed because model output was malformed/empty final `content`
+  - llama.cpp response contained useful `reasoning_content`, now captured in traces
+  - monitoring wake-up instructions added to prompts
+  - malformed-output and recovery-rate metrics added
+  - deterministic guardrail recovery added for obvious edge maintenance incidents
+  - regression tests added for baseline quality and empty-content recovery
+- Next:
+  - add true external framework adapters instead of profile-only simulations
+  - add grammar-constrained llama.cpp mode to reduce guardrail dependence
 
 ## Goal
 
