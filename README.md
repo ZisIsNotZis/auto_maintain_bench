@@ -31,6 +31,10 @@ Implemented:
 - framework-independent conversation adapter layer
 - named adapter policies: `llama_cpp_agent`, `smolagents`, `tinyagent`, `pure_llama_json`
 - matrix runner for harness/model/prompt combos
+- canonical scenario tree under `scenarios/<category>/<ID>.json`
+- current canonical pack includes all 180 catalog scenarios: 12 each across cpu, memory, disk, network, process, logs, health, timed output, config, data, artifact, user requests, security, mixed, and agent-output recovery
+- deterministic reports now include both `raw_score`/`raw_overall_score` and normalized score fields
+- score fields are normalized to `0.0..1.0` with weighted component breakdowns
 
 ## Repository layout
 
@@ -38,8 +42,7 @@ Implemented:
 auto_maintain_bench/
   harness/
   scenarios/
-    phase1/
-    examples/
+    <category>/<ID>.json
   configs/
   reports/
   run.py
@@ -63,6 +66,15 @@ python3 auto_maintain_bench/run.py \
   --output auto_maintain_bench/reports/phase1_run.json
 ```
 
+Canonical pack smoke:
+
+```bash
+python3 auto_maintain_bench/run.py \
+  --agent-mode baseline_rule \
+  --scenarios-dir scenarios \
+  --output reports/canonical_smoke.json
+```
+
 ### 2) Run llama-server backed agent
 
 ```bash
@@ -75,13 +87,30 @@ python3 auto_maintain_bench/run.py \
   --output auto_maintain_bench/reports/examples/single_probe.json
 ```
 
+Each benchmark run writes both the report JSON and per-round trajectory artifacts under
+`<report-stem>_traces/`. These artifacts preserve prompts, raw content,
+`reasoning_content`, raw API responses, parsed decisions, observations, and tool results.
+
+Inspect a report to drive the benchmark → inspect → analyze → improve loop:
+
+```bash
+python3 auto_maintain_bench/run.py \
+  --inspect-report auto_maintain_bench/reports/examples/single_probe.json \
+  --scenarios-dir auto_maintain_bench/scenarios \
+  --inspect-output auto_maintain_bench/reports/examples/single_probe_inspection.json
+```
+
+The inspection output flags weak detection, wrong diagnosis, ineffective tools,
+safety issues, missing trace artifacts, and scenario timing ambiguity. Use those
+findings to tune prompt decision boundaries or fix vague scenario definitions.
+
 ### 3) Run combo matrix (doubao-inspired examples)
 
 ```bash
 python3 auto_maintain_bench/run_matrix.py \
   --base-url http://127.0.0.1:8091/v1 \
   --model /home/z/hf/models--openbmb--MiniCPM5-1B-GGUF/snapshots/87007042419d30c1d8f38ef065424ee33870831e/MiniCPM5-1B-Q4_K_M.gguf \
-  --scenarios-dir auto_maintain_bench/scenarios/examples \
+  --scenarios-dir auto_maintain_bench/scenarios \
   --output auto_maintain_bench/reports/examples/doubao_example_matrix.json \
   --combo-output-tag minicpm5_1b \
   --max-rounds 1
@@ -95,30 +124,46 @@ Ran on:
 
 - model: `MiniCPM5-1B-Q4_K_M.gguf`
 - backend: `llama-server` (CPU path)
-- scenarios: `auto_maintain_bench/scenarios/examples` (3 quick scenarios)
+- scenarios: `auto_maintain_bench/scenarios` (canonical pack)
 - combo set: `configs/doubao_example_combos.json`
 
-Results:
+Current reports use normalized `0.0..1.0` component scores:
 
-| Combo | Overall | Detection | Analysis | Resolution | Safety | Durability | Mean detect round | Mean tool calls | Malformed output rate | Recovery rate |
-|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| `pure_llama_json` | 18.33 | 2.0 | 3.0 | 7.67 | 4.67 | 4.33 | null | 0.0 | 1.0 | 0.0 |
-| `llama_cpp_agent` | 91.67 | 25.0 | 25.0 | 23.33 | 7.33 | 11.0 | 0 | 2.67 | 1.0 | 1.0 |
-| `smolagents` | 91.67 | 25.0 | 25.0 | 23.33 | 7.33 | 11.0 | 0 | 2.67 | 1.0 | 1.0 |
-| `tinyagent` | 91.67 | 25.0 | 25.0 | 23.33 | 7.33 | 11.0 | 0 | 2.67 | 1.0 | 1.0 |
+| Field | Meaning |
+|---|---|
+| `overall_score` | Weighted final score after scenario ceiling normalization. |
+| `detection_score` | Smooth timing/evidence detection score. |
+| `analysis_score` | Diagnosis quality: type, subtype, root cause, evidence. |
+| `resolution_score` | Weighted blend of tool strategy, temporary fix, and permanent fix. |
+| `temporary_fix_score` | Immediate mitigation / validator success. |
+| `permanent_fix_score` | Durable prevention or appropriate residual-risk handling. |
+| `safety_score` | Regression and unsafe-action checks. |
+| `communication_score` | Operator/user message or escalation quality. |
+
+For micro-JSON tiny-model runs, reports also include
+`micro_action_repair_rate` and `micro_action_repair_count`. These indicate
+when the framework repaired invalid action IDs from current evidence/tool maps.
+Those repairs are preserved in trace metadata and capped/penalized so the score
+does not masquerade as fully model-owned tool selection.
+
+`compact_json` accepts exact tool names from `allowed_tools` as well as legacy
+numeric tool indexes. This avoids measuring a model's arbitrary ID translation
+when it can already name the correct maintenance tool. Diagnosis scoring also
+recognizes a bounded deterministic alias set and partial field slippage without
+using an LLM judge.
 
 Two-model run (`-ngl 0` CPU-only llama-server instances):
 
 | Model | Adapter | Overall | Mean detect round | Mean tool calls | Malformed output rate | Recovery rate |
 |---|---|---:|---:|---:|---:|---:|
-| MiniCPM5-1B-Q4_K_M | `pure_llama_json` | 18.33 | null | 0.0 | 1.0 | 0.0 |
-| MiniCPM5-1B-Q4_K_M | `llama_cpp_agent` | 91.67 | 0 | 2.67 | 1.0 | 1.0 |
-| MiniCPM5-1B-Q4_K_M | `smolagents` | 91.67 | 0 | 2.67 | 1.0 | 1.0 |
-| MiniCPM5-1B-Q4_K_M | `tinyagent` | 91.67 | 0 | 2.67 | 1.0 | 1.0 |
-| Qwen3.5-0.8B-UD-IQ3_XXS | `pure_llama_json` | 18.33 | null | 0.0 | 1.0 | 0.0 |
-| Qwen3.5-0.8B-UD-IQ3_XXS | `llama_cpp_agent` | 91.67 | 0 | 2.67 | 1.0 | 1.0 |
-| Qwen3.5-0.8B-UD-IQ3_XXS | `smolagents` | 91.67 | 0 | 2.67 | 1.0 | 1.0 |
-| Qwen3.5-0.8B-UD-IQ3_XXS | `tinyagent` | 91.67 | 0 | 2.67 | 1.0 | 1.0 |
+| MiniCPM5-1B-Q4_K_M | `pure_llama_json` | 0.1833 | null | 0.0 | 1.0 | 0.0 |
+| MiniCPM5-1B-Q4_K_M | `llama_cpp_agent` | 0.9167 | 0 | 2.67 | 1.0 | 1.0 |
+| MiniCPM5-1B-Q4_K_M | `smolagents` | 0.9167 | 0 | 2.67 | 1.0 | 1.0 |
+| MiniCPM5-1B-Q4_K_M | `tinyagent` | 0.9167 | 0 | 2.67 | 1.0 | 1.0 |
+| Qwen3.5-0.8B-UD-IQ3_XXS | `pure_llama_json` | 0.1833 | null | 0.0 | 1.0 | 0.0 |
+| Qwen3.5-0.8B-UD-IQ3_XXS | `llama_cpp_agent` | 0.9167 | 0 | 2.67 | 1.0 | 1.0 |
+| Qwen3.5-0.8B-UD-IQ3_XXS | `smolagents` | 0.9167 | 0 | 2.67 | 1.0 | 1.0 |
+| Qwen3.5-0.8B-UD-IQ3_XXS | `tinyagent` | 0.9167 | 0 | 2.67 | 1.0 | 1.0 |
 
 Note: Qwen3.5-0.6B GGUF was requested, but no exact local or `hf models search` match was found in this environment. The run uses the closest local Qwen-family tiny model available: `Qwen3.5-0.8B-UD-IQ3_XXS.gguf`.
 
@@ -134,6 +179,10 @@ Source files:
 - `reports/examples/tinyagent.json`
 - `reports/examples/debug_after_fix.json`
 
+The example source artifacts above are legacy pre-normalization reports; table
+scores are shown on the current `0.0..1.0` scale by dividing their percentage
+values by 100.
+
 ## What these results mean
 
 For this model/backend setup, the pure LM adapter fails:
@@ -141,7 +190,7 @@ For this model/backend setup, the pure LM adapter fails:
 - `malformed_output_rate = 1.0`
 - `mean_detect_round = null`
 - `mean_tool_calls = 0.0`
-- overall score stays low (`18.33`)
+- overall score stays low (`0.1833`)
 
 The root cause is visible in traces: this MiniCPM5-1B setup often spends the entire short generation budget in `reasoning_content` and leaves final `content` empty or non-JSON. The adapter records both fields in `records[*].agent_meta.raw_content` and `records[*].agent_meta.raw_reasoning_content`.
 
@@ -150,7 +199,7 @@ The guarded agent profiles recover with deterministic maintenance guardrails:
 - `recovery_rate = 1.0`
 - detection happens at round `0`
 - safe bounded tools execute (`mean_tool_calls = 2.67`)
-- overall score reaches `91.67`
+- overall score reaches `0.9167`
 
 The named framework adapters share a framework-independent conversation loop and differ by adapter policy:
 
@@ -170,7 +219,7 @@ The current results separately measure:
 
 `configs/doubao_example_combos.json` uses named adapter policies inspired by the recommendation families in `doubao_suggestion.md`: `llama_cpp_agent`, `smolagents`, and `tinyagent`.
 
-Because all three guarded adapters currently share the same deterministic recovery layer and the same three quick scenarios, their scores are expected to match. Native framework backends should later be plugged in under the adapter interface so command-line/runtime differences are measured directly.
+Because the guarded adapters currently share the same deterministic recovery layer, their scores may match closely even when raw traces differ. Native framework backends should later be plugged in under the adapter interface so command-line/runtime differences are measured directly.
 
 ## License
 

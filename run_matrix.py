@@ -25,7 +25,7 @@ def _resolve_path(path: str) -> Path:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run combo matrix for auto_maintain_bench.")
     parser.add_argument("--combos-file", default="configs/doubao_example_combos.json")
-    parser.add_argument("--scenarios-dir", default="scenarios/phase1")
+    parser.add_argument("--scenarios-dir", default="scenarios")
     parser.add_argument("--base-url", required=True, help="llama-server base URL, e.g. http://127.0.0.1:8091/v1")
     parser.add_argument("--model", required=True, help="llama-server model name/path")
     parser.add_argument("--output", default="reports/doubao_example_matrix.json")
@@ -66,6 +66,7 @@ def main() -> None:
             max_tokens=int(combo.get("max_tokens", 220)),
             recovery_mode=str(combo.get("recovery_mode", adapter.recovery_mode)),
             debug_prompts=bool(combo.get("debug_prompts", False)),
+            grammar_mode=str(combo.get("grammar_mode", "none")),
             adapter_name=adapter_name,
         )
         results.append(
@@ -78,14 +79,19 @@ def main() -> None:
                 "detection_score": result["summary"]["detection_score"],
                 "analysis_score": result["summary"]["analysis_score"],
                 "resolution_score": result["summary"]["resolution_score"],
+                "temporary_fix_score": result["summary"]["temporary_fix_score"],
+                "permanent_fix_score": result["summary"]["permanent_fix_score"],
                 "safety_score": result["summary"]["safety_score"],
-                "durability_score": result["summary"]["durability_score"],
+                "communication_score": result["summary"]["communication_score"],
                 "mean_detect_round": result["latency"]["mean_detect_round"],
                 "mean_llm_calls": result["efficiency"]["mean_llm_calls"],
                 "mean_tool_calls": result["efficiency"]["mean_tool_calls"],
                 "malformed_output_rate": result["efficiency"]["malformed_output_rate"],
+                "parseable_output_rate": result["efficiency"]["parseable_output_rate"],
+                "compact_output_rate": result["efficiency"]["compact_output_rate"],
                 "recovery_rate": result["efficiency"]["recovery_rate"],
                 "recovery_count": result["efficiency"]["recovery_count"],
+                "model_independence_score": result["efficiency"]["model_independence_score"],
             }
         )
         print(f"{name}: overall={result['summary']['overall_score']}")

@@ -32,12 +32,25 @@
 - ✅ Maximal scenario planning added:
   - `docs/scenario_catalog.md` enumerates 180 diverse candidate scenarios with significance, difficulty, max score class, and implementation notes.
   - `docs/scoring_rubric.md` defines the deterministic score formula, max-score classes, safety caps, and category-specific scoring rules.
+- ✅ Expanded priority pack materialized further with resource, data, user_request, mixed, and agent-output cases:
+  - log directory full
+  - unsafe SQL refusal
+  - CTA copy change
+  - incident report generation
+  - warning-only noisy baseline
+  - malformed JSON recovery
+- ✅ Canonical docs layout now implemented:
+  - scenarios live under `scenarios/<category>/<ID>.json`
+  - loader filters to canonical category folders and catalog IDs
+  - CLI defaults now point at the canonical `scenarios/` root
+  - canonical smoke pack now includes all 180 catalog rows
 
 ## Planning Documents
 
 - `docs/scenario_catalog.md` is the implementation handoff catalog. Use it to choose and implement new benchmark scenarios.
 - `docs/scoring_rubric.md` is the source of truth for scoring design. Use it when adding new validators or max-score classes.
 - This `plan.md` remains the high-level architecture/status document.
+- Next concrete step: run the expanded LLM matrix on the full 180-scenario pack and refresh example reports.
 
 ## Goal
 
