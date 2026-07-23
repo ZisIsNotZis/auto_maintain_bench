@@ -9,9 +9,13 @@ Legend:
 
 ## Implementation Rules for All Scenarios
 
-1. Start as JSON scenario definitions, not real destructive host tests.
-2. Use simulated fixtures first; only later add Docker/cgroup fault injection.
-3. Every scenario must define:
+1. Each scenario is a real runnable project, with project-facing content under `src/` only.
+2. Agent runtime visibility is limited to `src/`; benchmark-only assets stay outside `src/`.
+3. Every scenario must define benchmark-facing artifacts:
+   - hidden `tests/` validators
+   - `scoring.json` parameters consumed by the benchmark layer
+   - optional maintainer `DESIGN.md` notes (not visible to agent)
+4. Every scenario must define:
    - fault/request rounds
    - expected problem type/subtype/root-cause label
    - required evidence keys
@@ -20,8 +24,8 @@ Legend:
    - durability validators
    - regression validators
    - max score class
-4. Do not require LLM-as-judge.
-5. Keep edge-side realism: if source code is unavailable or binary-only, max should usually be `report` or `fix_temporary`.
+5. Do not require LLM-as-judge.
+6. Keep edge-side realism: if source code is unavailable or binary-only, max should usually be `report` or `fix_temporary`.
 
 ## A. CPU and Scheduling
 
@@ -311,4 +315,3 @@ When implementing any row above:
 7. Add one regression test if the scenario requires new harness behavior.
 8. Run baseline agent and at least one LLM adapter.
 9. Update summary report.
-

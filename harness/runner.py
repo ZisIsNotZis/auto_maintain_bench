@@ -8,12 +8,34 @@ import time
 from typing import Any
 
 from .agent_protocol import parse_decision, validate_decision_shape, decision_to_dict
-from .baseline_agent import BaselineRuleAgent
-from .llm_agent import LlamaJSONAgent
 from .event_feed import WorldState, apply_round_event, iter_rounds
+from .model_under_test import ModelTarget, create_model_under_test
 from .scenario_schema import Scenario, load_scenarios
 from .scoring import RoundTrace, score_scenario
-from .tools import execute_tool, run_durability_validations, run_fix_validations, run_regression_checks
+from .tool_registry import ToolRegistry
+from .tools import run_durability_validations, run_fix_validations, run_regression_checks
+
+
+def _clip_text(value: str, limit: int = 320) -> str:
+    text = (value or "").strip().replace("\n", "\\n")
+    if len(text) <= limit:
+        return text
+    return text[: limit - 3] + "..."
+
+
+def _observation_summary(observation: dict[str, Any]) -> str:
+    metrics = observation.get("metrics") or {}
+    health = observation.get("health") or {}
+    signals = observation.get("signals") or {}
+    logs = observation.get("logs") or []
+    recent_logs = " | ".join(str(x) for x in logs[-2:])
+    return (
+        f"cpu={metrics.get('cpu_pct','?')} ram={metrics.get('ram_pct','?')} "
+        f"disk={metrics.get('disk_pct','?')} inode={metrics.get('inode_pct','?')} "
+        f"api={health.get('api','?')} queue={health.get('queue','?')} "
+        f"workers={signals.get('worker_multiplier','?')} "
+        f"logs={_clip_text(recent_logs, 140)}"
+    )
 
 
 def _scenario_trace_record(
@@ -58,6 +80,22 @@ def _write_trace_artifact(
         "decision": decision_payload,
         "protocol_errors": protocol_errors,
         "tool_results": tool_results,
+        "canonical_trace": {
+            "inputs": meta.get("visible_inputs", []),
+            "outputs": meta.get("visible_outputs", []),
+            "final_output": meta.get("final_output", ""),
+            "final_json": (
+                decision_payload
+                if meta.get("final_output") or int(meta.get("llm_calls", 0)) == 0
+                else None
+            ),
+            "tool_results": tool_results,
+            "legacy_hidden_output_used": bool(
+                not meta.get("final_output")
+                and meta.get("raw_reasoning_content")
+                and meta.get("model_payload_parseable")
+            ),
+        },
         "agent_meta": meta,
         "trajectory_integrity": {
             "has_system_prompt": bool(meta.get("system_prompt")),
@@ -93,29 +131,33 @@ def run_benchmark(
     adapter_name: str = "baseline_rule",
     preserve_trace_artifacts: bool = True,
     trace_dir: Path | None = None,
+    verbose_run: bool = True,
+    verbose_chars: int = 320,
 ) -> dict[str, Any]:
     started = time.time()
     scenarios = load_scenarios(scenarios_dir)
     if agent_mode == "baseline_rule":
-        agent = BaselineRuleAgent()
+        target = ModelTarget(kind="baseline")
     elif agent_mode == "llama_json":
-        if not base_url or not model:
-            raise ValueError("base_url and model are required for agent_mode=llama_json")
-        agent = LlamaJSONAgent(
+        target = ModelTarget(
+            kind="raw",
             base_url=base_url,
             model=model,
-            prompt_style=prompt_style,
-            harness_profile=harness_profile,
-            tool_mode=tool_mode,
-            memory_mode=memory_mode,
-            timeout_s=timeout_s,
-            max_tokens=max_tokens,
-            recovery_mode=recovery_mode,
-            debug_prompts=debug_prompts,
-            grammar_mode=grammar_mode,
+            options={
+                "prompt_style": prompt_style,
+                "harness_profile": harness_profile,
+                "tool_mode": tool_mode,
+                "memory_mode": memory_mode,
+                "timeout_s": timeout_s,
+                "max_tokens": max_tokens,
+                "recovery_mode": recovery_mode,
+                "debug_prompts": debug_prompts,
+                "grammar_mode": grammar_mode,
+            },
         )
     else:
         raise ValueError(f"unsupported agent_mode={agent_mode}")
+    agent = create_model_under_test(target)
 
     records: list[dict[str, Any]] = []
     by_scenario: dict[str, Any] = {}
@@ -133,13 +175,28 @@ def run_benchmark(
     total_micro_action_repairs = 0
     trace_artifacts: list[str] = []
     trace_root = trace_dir or output_path.with_suffix("").parent / f"{output_path.stem}_traces"
+    tool_registry = ToolRegistry(Path(__file__).resolve().parents[1] / "plugins" / "tools")
 
-    for scenario in scenarios:
+    if verbose_run:
+        print(
+            "[run] "
+            f"agent_mode={agent_mode} adapter={adapter_name} prompt_style={prompt_style} "
+            f"grammar_mode={grammar_mode} recovery_mode={recovery_mode} scenarios={len(scenarios)} "
+            f"max_rounds={max_rounds if max_rounds is not None else 'all'}"
+        )
+
+    for scenario_idx, scenario in enumerate(scenarios, start=1):
         state = WorldState.from_baseline(scenario.baseline_state)
         traces: list[RoundTrace] = []
         protocol_fail_count = 0
         if hasattr(agent, "reset_scenario"):
             agent.reset_scenario()
+        if verbose_run:
+            print(
+                f"[scenario {scenario_idx}/{len(scenarios)}] "
+                f"{scenario.id} | {scenario.title} | fault_round={scenario.fault_round} "
+                f"deadline_round={scenario.deadline_round} | max_score_class={scenario.max_score_class}"
+            )
 
         rounds = iter_rounds(scenario)
         if max_rounds is not None:
@@ -153,6 +210,8 @@ def run_benchmark(
                 "signals": dict(state.signals),
                 "logs": list(state.logs),
             }
+            if verbose_run:
+                print(f"  [round {rnd.round}] obs {_observation_summary(observation)}")
             if hasattr(agent, "decide_with_meta"):
                 decision_obj, meta = agent.decide_with_meta(scenario, rnd.round, state)
             else:
@@ -187,7 +246,11 @@ def run_benchmark(
                         {"tool": action.tool, "ok": False, "observation": {"error": "protocol_invalid"}}
                     )
                     continue
-                result = execute_tool(tool=action.tool, args=action.args, state=state, scenario=scenario)
+                result = tool_registry.invoke(
+                    {"type": action.tool, "args": action.args},
+                    state=state,
+                    scenario=scenario,
+                )
                 if not result.ok:
                     tool_failures += 1
                     total_tool_failures += 1
@@ -245,6 +308,24 @@ def run_benchmark(
                 rec["trajectory_artifact"] = artifact_path
                 trace_artifacts.append(artifact_path)
             records.append(rec)
+            if verbose_run:
+                raw_content = _clip_text(str((meta or {}).get("raw_content", "")), verbose_chars)
+                raw_reasoning = _clip_text(str((meta or {}).get("raw_reasoning_content", "")), verbose_chars)
+                print(
+                    "    [decision] "
+                    f"status={parsed.status} type={parsed.detected_problem.type} subtype={parsed.detected_problem.subtype} "
+                    f"root={parsed.root_cause.label} actions={[a.tool for a in parsed.actions]} "
+                    f"parseable={(meta or {}).get('model_payload_parseable', False)} "
+                    f"malformed={(meta or {}).get('malformed_output', False)} "
+                    f"recovery={(meta or {}).get('recovery_applied', False)} "
+                    f"finish={(meta or {}).get('finish_reason', '')}"
+                )
+                if raw_content:
+                    print(f"    [content] {raw_content}")
+                if raw_reasoning:
+                    print(f"    [reasoning] {raw_reasoning}")
+                if protocol_errors:
+                    print(f"    [protocol_errors] {protocol_errors}")
 
         fix_validation = run_fix_validations(scenario, state)
         durability_validation = run_durability_validations(scenario, state)
@@ -283,6 +364,13 @@ def run_benchmark(
             "protocol_fail_count": protocol_fail_count,
         }
         by_category_scores.setdefault(scenario.category, []).append(score.total)
+        if verbose_run:
+            print(
+                f"  [scenario_score] total={score.total:.4f} detection={score.breakdown['detection']:.4f} "
+                f"diagnosis={score.breakdown['diagnosis']:.4f} action={score.breakdown['action_strategy']:.4f} "
+                f"temp={score.breakdown['temporary_fix']:.4f} perm={score.breakdown['permanent_fix']:.4f} "
+                f"safety={score.breakdown['safety']:.4f} comm={score.breakdown['communication']:.4f}"
+            )
 
     all_scores = [v["score"] for v in by_scenario.values()]
     detect_rounds = [v["detected_round"] for v in by_scenario.values() if v["detected_round"] is not None]
@@ -331,6 +419,7 @@ def run_benchmark(
             "debug_prompts": debug_prompts,
             "grammar_mode": grammar_mode,
             "adapter_name": adapter_name,
+            "benchmark_contract": "legacy_protocol",
         },
         "summary": summary,
         "by_category": by_category,
@@ -386,6 +475,13 @@ def run_benchmark(
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(json.dumps(result, indent=2, ensure_ascii=True), encoding="utf-8")
+    if verbose_run:
+        print(
+            "[done] "
+            f"overall={summary['overall_score']:.4f} detection={summary['detection_score']:.4f} "
+            f"analysis={summary['analysis_score']:.4f} resolution={summary['resolution_score']:.4f} "
+            f"artifacts={len(trace_artifacts)}"
+        )
     return result
 
 

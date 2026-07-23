@@ -1,77 +1,23 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
+import subprocess
 from typing import Any
 from urllib import request, error
 
 from .agent_protocol import Action, AgentDecision, Problem, RootCause, parse_decision
+from .contracts import load_grammar, load_prompt_catalog
 from .event_feed import WorldState
 from .scenario_schema import Scenario
 
 
-PROMPT_STYLES: dict[str, str] = {
-    "strict_json": (
-        "You are an edge auto-maintenance agent. Each user message is a monitoring wake-up tick. "
-        "If logs/metrics/health already show a serious problem, mark it incident/escalate and act now. "
-        "If current health is healthy, logs are informational, and metrics are below pressure thresholds, return ok with no actions. "
-        "Do not act from title/description alone. Prefer diagnose+fix over restart-only: CPU pressure needs concurrency/config action, disk pressure needs cleanup/retention, code tracebacks need patch_script, and unsafe/binary/external cases need notify_human. "
-        "Output ONLY JSON matching required schema. Use safest action set. "
-        "Escalate when compiled/non-trivial bugs cannot be safely fixed."
-    ),
-    "ops_playbook": (
-        "You are a senior SRE in constrained edge CPU-only environment. Each prompt is a timed observation round. "
-        "Prioritize fast detection, accurate root cause, low-risk fix, and safe escalation when needed. "
-        "Use current observations only: healthy current evidence means ok+no action; degraded health, severe logs, or metrics near saturation mean suspect/incident. "
-        "Choose the state-changing tool that matches the evidence instead of restart-only. "
-        "Output only JSON."
-    ),
-    "minimal": (
-        "This is a monitoring wake-up tick. Use current metrics/logs/health/signals only. "
-        "If healthy, output ok and no actions. If degraded/severe/saturated, diagnose exact type/root and choose a matching safe tool. "
-        "Output strict JSON only."
-    ),
-    "compact_json": (
-        "You are an edge auto-maintenance agent. Output ONLY one compact JSON object. "
-        "No prose. No markdown. Diagnose the current monitoring tick and choose safe tools. "
-        "Title/description are scenario context, not current evidence; act only on metrics/logs/health/signals. "
-        "Healthy current observations => s=ok and a=[]. Degraded health, severe logs, or metrics >=90 => active status. "
-        "Pick type/subtype/root from evidence maps, then include a matching state-changing allowed tool, not restart-only."
-    ),
-    "micro_json": (
-        "You are an edge auto-maintenance agent. Output ONLY one tiny JSON object using integer IDs. "
-        "No prose. No markdown. Choose the best diagnosis and safe tools for the current tick. "
-        "Title/description are context, not current evidence; use [] if current observations are healthy. "
-        "Use s=0 only when health is healthy, logs are informational, and metrics are below pressure thresholds. "
-        "If health is degraded, severe logs appear, or cpu/ram/disk/inode >=90, use suspect/incident and choose type/subtype/root IDs by evidence. "
-        "Include a state-changing tool ID that matches the evidence; do not rely on restart-only when a specific fix tool exists."
-    ),
-}
-
-
-HARNESS_PROFILES: dict[str, str] = {
-    "llama_cpp_agent_style": "Prefer deterministic structured output and concise tool plan.",
-    "smolagents_style": "Use simple practical tool actions and avoid over-planning.",
-    "tinyagent_style": "Keep context short, choose minimal relevant tools, act quickly.",
-}
-
-
-_COMPACT_JSON_GRAMMAR = r'''
-root ::= "{" ws "\"s\"" ws ":" ws status ws "," ws "\"t\"" ws ":" ws string ws "," ws "\"u\"" ws ":" ws string ws "," ws "\"r\"" ws ":" ws string ws "," ws "\"a\"" ws ":" ws array ws "," ws "\"risk\"" ws ":" ws risk ws "," ws "\"msg\"" ws ":" ws string ws "}"
-status ::= "\"ok\"" | "\"suspect\"" | "\"incident\"" | "\"resolved\"" | "\"escalate\"" | "\"need_more_info\""
-risk ::= "\"low\"" | "\"medium\"" | "\"high\""
-array ::= "[" ws (item (ws "," ws item)*)? ws "]"
-item ::= string
-string ::= "\"" ([^"\\] | "\\" ["\\/bfnrt])* "\""
-ws ::= [ \t\n\r]*
-'''
-
-
-_MICRO_JSON_GRAMMAR = r'''
-root ::= "{" ws "\"s\"" ws ":" ws number ws "," ws "\"t\"" ws ":" ws number ws "," ws "\"u\"" ws ":" ws number ws "," ws "\"r\"" ws ":" ws number ws "," ws "\"a\"" ws ":" ws array ws "}"
-array ::= "[" ws (number (ws "," ws number)*)? ws "]"
-number ::= [0-9]+
-ws ::= [ \t\n\r]*
-'''
+_CONTRACT_ROOT = Path(__file__).resolve().parents[1] / "benchmarks" / "legacy_decision_v0"
+_PROMPT_CATALOG = load_prompt_catalog(_CONTRACT_ROOT)
+PROMPT_STYLES: dict[str, str] = _PROMPT_CATALOG["styles"]
+HARNESS_PROFILES: dict[str, str] = _PROMPT_CATALOG["profiles"]
+_COMPACT_JSON_GRAMMAR = load_grammar(_CONTRACT_ROOT, "compact")
+_MICRO_JSON_GRAMMAR = load_grammar(_CONTRACT_ROOT, "micro")
 
 
 class LlamaJSONAgent:
@@ -115,6 +61,7 @@ class LlamaJSONAgent:
                 tools = allowed_tools
         else:
             tools = self._ordered_tools(scenario, allowed_tools, diagnostic)
+        diagnostic_tools_available = [tool for tool in tools if tool in diagnostic]
 
         memory_block = ""
         if self.memory_mode == "rolling" and self._memory:
@@ -217,12 +164,13 @@ class LlamaJSONAgent:
                 (
                     "action_boundary=fault_evidence=false: return no actions even when tools are available."
                     if not evidence_summary["fault_evidence"]
-                    else "action_boundary=fault_evidence=true: prefer a specific allowed fix tool tied to the evidence before/with restart_service. "
+                    else "action_boundary=fault_evidence=true: if any diagnostic tool is available, include exactly one diagnostic tool first, then add specific fix tools before/with restart_service. "
                     "CPU pressure: throttle_concurrency/edit_config. Disk/inode pressure: cleanup_tmp/prune_logs/edit_config. "
                     "Memory pressure: trim_cache/edit_config. Tracebacks/source bugs: patch_script. "
                     "Network timeouts: enable_backoff/fix_dns or notify_human. Unsafe/binary/external cases: notify_human."
                 ),
                 f"allowed_tools={json.dumps(tools, ensure_ascii=True)}",
+                f"available_diagnostic_tools={json.dumps(diagnostic_tools_available, ensure_ascii=True)}",
                 f"tool_map={json.dumps(tool_map, ensure_ascii=True)}",
                 f"choice_maps={json.dumps(choice_maps, ensure_ascii=True)}",
                 memory_block,
@@ -237,7 +185,7 @@ class LlamaJSONAgent:
                         'final_constraint=fault_evidence=false; output exactly '
                         '{"s":"ok","t":"unknown","u":"unknown","r":"unknown","a":[],"risk":"low","msg":"No active fault."}'
                         if not evidence_summary["fault_evidence"]
-                        else "final_constraint=fault_evidence=true, so s=ok is forbidden; output s=suspect or s=incident and at least one exact tool name from allowed_tools"
+                        else "final_constraint=fault_evidence=true, so s=ok is forbidden; output s=suspect or s=incident and at least one exact tool name from allowed_tools; if available_diagnostic_tools is non-empty include one of them in a"
                     )
                     if self.prompt_style == "compact_json"
                     else (
@@ -309,6 +257,12 @@ class LlamaJSONAgent:
             "micro_invalid_action_ids": micro_invalid_action_ids,
             "system_prompt": system,
             "user_prompt": user,
+            "visible_inputs": [
+                *([{"role": "system", "content": system}] if system else []),
+                {"role": "user", "content": user},
+            ],
+            "visible_outputs": debug.get("visible_outputs", []),
+            "final_output": debug.get("content", ""),
             "tool_map": tool_map,
             "choice_maps": choice_maps,
         }
@@ -457,10 +411,18 @@ class LlamaJSONAgent:
             "max_tokens": self.max_tokens,
             "response_format": {"type": "json_object"},
         }
-        if self.grammar_mode == "compact_json":
+        effective_grammar_mode = self.grammar_mode
+        if effective_grammar_mode == "auto":
+            if self.prompt_style == "micro_json":
+                effective_grammar_mode = "micro_json"
+            elif self.prompt_style == "compact_json":
+                effective_grammar_mode = "compact_json"
+            else:
+                effective_grammar_mode = "none"
+        if effective_grammar_mode == "compact_json":
             body.pop("response_format", None)
             body["grammar"] = _COMPACT_JSON_GRAMMAR
-        elif self.grammar_mode == "micro_json":
+        elif effective_grammar_mode == "micro_json":
             body.pop("response_format", None)
             body["grammar"] = grammar or _MICRO_JSON_GRAMMAR
         req = request.Request(
@@ -493,8 +455,189 @@ class LlamaJSONAgent:
             "finish_reason": str(choice.get("finish_reason", "")),
             "content": str(content),
             "reasoning_content": reasoning,
+            "visible_outputs": (
+                [{"role": "assistant", "content": str(content)}]
+                if str(content).strip()
+                else []
+            ),
             "raw_api_response": payload,
             "request_body": body,
+        }
+        return combined, usage, debug
+
+
+class _LegacyDecisionMethods(LlamaJSONAgent):
+    def __init__(
+        self,
+        *,
+        copilot_binary: str = "copilot",
+        copilot_model: str = "auto",
+        prompt_style: str = "compact_json",
+        harness_profile: str = "tinyagent_style",
+        tool_mode: str = "retrieval",
+        memory_mode: str = "none",
+        timeout_s: float = 180.0,
+        max_tokens: int = 220,
+        recovery_mode: str = "none",
+        debug_prompts: bool = False,
+        grammar_mode: str = "none",
+    ) -> None:
+        super().__init__(
+            base_url="copilot://local",
+            model=copilot_model,
+            prompt_style=prompt_style,
+            harness_profile=harness_profile,
+            tool_mode=tool_mode,
+            memory_mode=memory_mode,
+            timeout_s=timeout_s,
+            max_tokens=max_tokens,
+            recovery_mode=recovery_mode,
+            debug_prompts=debug_prompts,
+            grammar_mode=grammar_mode,
+        )
+        self.copilot_binary = copilot_binary
+
+    def _chat(self, *, system: str, user: str, grammar: str | None = None) -> tuple[str, dict[str, Any], dict[str, str]]:
+        del grammar
+        prompt = "\n\n".join(
+            [
+                system,
+                user,
+                "Return only the required JSON object and no surrounding prose.",
+            ]
+        )
+        cmd = [
+            self.copilot_binary,
+            "--model",
+            self.model,
+            "--output-format",
+            "json",
+            "--stream",
+            "off",
+            "--no-custom-instructions",
+            "--enable-reasoning-summaries",
+            "--prompt",
+            prompt,
+        ]
+        try:
+            proc = subprocess.run(
+                cmd,
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=self.timeout_s,
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise RuntimeError(f"Copilot CLI timeout after {self.timeout_s}s") from exc
+        except OSError as exc:
+            raise RuntimeError(f"Copilot CLI invocation failed: {exc}") from exc
+
+        stdout = proc.stdout or ""
+        stderr = proc.stderr or ""
+        if proc.returncode != 0:
+            raise RuntimeError(
+                f"Copilot CLI failed (exit={proc.returncode}): {stderr.strip() or stdout.strip()[:300]}"
+            )
+
+        events: list[dict[str, Any]] = []
+        malformed_lines: list[str] = []
+        for raw_line in stdout.splitlines():
+            line = raw_line.strip()
+            if not line:
+                continue
+            try:
+                events.append(json.loads(line))
+            except json.JSONDecodeError:
+                malformed_lines.append(line)
+
+        assistant_messages = [e for e in events if e.get("type") == "assistant.message"]
+        last_message = assistant_messages[-1] if assistant_messages else {}
+        last_data = last_message.get("data") if isinstance(last_message.get("data"), dict) else {}
+        content = str(last_data.get("content", "") or "")
+        model_used = str(last_data.get("model", "") or "")
+        reasoning_opaque = str(last_data.get("reasoningOpaque", "") or "")
+        turn_id = str(last_data.get("turnId", "") or "")
+
+        deltas_by_id: dict[str, list[str]] = {}
+        for e in events:
+            if e.get("type") != "assistant.message_delta":
+                continue
+            data = e.get("data") if isinstance(e.get("data"), dict) else {}
+            msg_id = str(data.get("messageId", "") or "")
+            delta = str(data.get("deltaContent", "") or "")
+            if msg_id and delta:
+                deltas_by_id.setdefault(msg_id, []).append(delta)
+        if not content and assistant_messages:
+            msg_id = str(last_data.get("messageId", "") or "")
+            if msg_id and msg_id in deltas_by_id:
+                content = "".join(deltas_by_id[msg_id])
+
+        reasoning_chunks: list[str] = []
+        reasoning_ids: list[str] = []
+        for e in events:
+            if e.get("type") != "assistant.reasoning":
+                continue
+            data = e.get("data") if isinstance(e.get("data"), dict) else {}
+            rid = str(data.get("reasoningId", "") or "")
+            if rid:
+                reasoning_ids.append(rid)
+            chunk = str(data.get("content", "") or "")
+            if chunk:
+                reasoning_chunks.append(chunk)
+        reasoning_content = "\n".join(reasoning_chunks)
+
+        usage_event = next((e for e in reversed(events) if e.get("type") == "session.usage_checkpoint"), {})
+        usage_data = usage_event.get("data") if isinstance(usage_event.get("data"), dict) else {}
+        usage = {"prompt_tokens": 0, "completion_tokens": 0}
+        finish_event = next((e for e in reversed(events) if e.get("type") == "assistant.turn_end"), {})
+        finish_data = finish_event.get("data") if isinstance(finish_event.get("data"), dict) else {}
+
+        combined = content if content.strip() else reasoning_content
+        debug = {
+            "finish_reason": str(finish_data.get("reason", "") or ""),
+            "content": content,
+            "reasoning_content": reasoning_content,
+            "visible_outputs": [
+                {
+                    "role": "assistant",
+                    "content": str(
+                        (event.get("data") if isinstance(event.get("data"), dict) else {}).get(
+                            "content", ""
+                        )
+                        or ""
+                    ),
+                }
+                for event in assistant_messages
+                if str(
+                    (event.get("data") if isinstance(event.get("data"), dict) else {}).get(
+                        "content", ""
+                    )
+                    or ""
+                ).strip()
+            ],
+            "raw_api_response": {
+                "events": events,
+                "stdout_jsonl": stdout,
+                "stderr": stderr,
+                "return_code": proc.returncode,
+                "malformed_jsonl_lines": malformed_lines,
+            },
+            "request_body": {
+                "command": cmd,
+                "prompt": prompt,
+                "system": system,
+                "user": user,
+            },
+            "copilot": {
+                "model_requested": self.model,
+                "model_used": model_used,
+                "turn_id": turn_id,
+                "reasoning_opaque": reasoning_opaque,
+                "reasoning_ids": reasoning_ids,
+                "usage_checkpoint": usage_data,
+                "event_count": len(events),
+                "delta_chunks": sum(len(v) for v in deltas_by_id.values()),
+            },
         }
         return combined, usage, debug
 
@@ -1183,3 +1326,29 @@ class LlamaJSONAgent:
         if tool == "notify_human":
             return {"message": "Escalation required."}
         return {}
+
+
+# Keep LlamaJSONAgent behavior stable after introducing CopilotCLIAgent in this
+# single-file module: these helper methods are shared by both classes.
+for _shared_method_name in (
+    "_coerce_json",
+    "_malformed_payload",
+    "_is_compact_payload",
+    "_is_micro_payload",
+    "_valid_full_payload_shape",
+    "_choice_maps",
+    "_indexed_choices",
+    "_expand_micro_payload",
+    "_evidence_matching_tools",
+    "_expand_compact_payload",
+    "_evidence_from_state",
+    "_default_intent",
+    "_heuristic_payload",
+    "_default_args",
+):
+    if not hasattr(LlamaJSONAgent, _shared_method_name):
+        setattr(
+            LlamaJSONAgent,
+            _shared_method_name,
+            getattr(_LegacyDecisionMethods, _shared_method_name),
+        )

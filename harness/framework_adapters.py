@@ -24,7 +24,7 @@ FRAMEWORK_ADAPTERS: dict[str, FrameworkAdapterSpec] = {
         memory_mode="rolling",
         recovery_mode="heuristic",
         description="Framework-independent conversation adapter over OpenAI-compatible llama-server.",
-        command_hint="python3 run.py --agent-mode llama_json --adapter generic_conversation ...",
+        command_hint="python3 run.py --model <model> --adapter generic_conversation ...",
     ),
     "llama_cpp_agent": FrameworkAdapterSpec(
         name="llama_cpp_agent",
@@ -64,7 +64,7 @@ FRAMEWORK_ADAPTERS: dict[str, FrameworkAdapterSpec] = {
         memory_mode="rolling",
         recovery_mode="none",
         description="Control adapter: raw llama-server JSON output without deterministic recovery.",
-        command_hint="python3 run.py --agent-mode llama_json --adapter pure_llama_json ...",
+        command_hint="python3 run.py --model <model> --adapter pure_llama_json ...",
     ),
 }
 
@@ -75,4 +75,3 @@ def get_adapter(name: str) -> FrameworkAdapterSpec:
     except KeyError as exc:
         allowed = ", ".join(sorted(FRAMEWORK_ADAPTERS))
         raise ValueError(f"unknown adapter {name!r}; allowed: {allowed}") from exc
-

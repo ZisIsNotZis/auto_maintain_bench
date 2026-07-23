@@ -2,10 +2,10 @@
 set -euo pipefail
 
 MODEL_PATH="${1:-}"
-HOST="${HOST:-127.0.0.1}"
 PORT="${PORT:-8080}"
-CTX_SIZE="${CTX_SIZE:-4096}"
-THREADS="${THREADS:-$(nproc)}"
+CTX_SIZE="${CTX_SIZE:-16384}"
+REASONING_MODE="${REASONING_MODE:-auto}"
+shift || true
 
 if [[ -z "${MODEL_PATH}" ]]; then
   echo "Usage: $0 <model.gguf>"
@@ -18,11 +18,15 @@ if [[ ! -f "${MODEL_PATH}" ]]; then
   exit 1
 fi
 
+SPEC_ARGS=()
+if [[ "${MODEL_PATH}" == *"Qwen3.5-2B"* && "${MODEL_PATH}" == *"MTP"* ]]; then
+  SPEC_ARGS=(--spec-type draft-mtp --spec-draft-n-max 1)
+fi
+
 exec llama-server \
   --model "${MODEL_PATH}" \
-  --host "${HOST}" \
   --port "${PORT}" \
   --ctx-size "${CTX_SIZE}" \
-  --threads "${THREADS}" \
-  -ngl 0
-
+  --reasoning "${REASONING_MODE}" \
+  "${SPEC_ARGS[@]}" \
+  "$@"
