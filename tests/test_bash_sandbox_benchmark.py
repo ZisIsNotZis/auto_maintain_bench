@@ -12,7 +12,7 @@ from harness.bash_sandbox_benchmark import (
     DockerSandbox,
     load_bash_scenarios,
 )
-from harness.contracts import load_benchmark_contract
+from harness.contracts import load_harness_contract
 from harness.maintenance_loop import ToolCall
 
 
@@ -41,20 +41,19 @@ class ScriptedTransport:
 @unittest.skipUnless(shutil.which("docker"), "Docker is required")
 class BashSandboxBenchmarkTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.contract = load_benchmark_contract(
-            ROOT / "benchmarks" / "maintenance_v1"
-        )
+        self.contract = load_harness_contract(ROOT / "harness")
         self.scenarios = {
             scenario.id: scenario
             for scenario in load_bash_scenarios(
-                ROOT / "benchmarks" / "maintenance_v1" / "scenarios",
+                ROOT / "scenarios",
             )
         }
 
-    def test_catalog_includes_three_verified_pilot_scenarios(self) -> None:
-        self.assertEqual(set(self.scenarios), {"CPU-001", "DISK-001", "CFG-001"})
+    def test_catalog_loads_runner_agnostic_scenario_projects(self) -> None:
+        self.assertGreaterEqual(len(self.scenarios), 175)
+        self.assertTrue({"CPU-001", "DISK-001", "CFG-001"}.issubset(self.scenarios))
         for scenario in self.scenarios.values():
-            self.assertIn("# Operations", scenario.project_readme)
+            self.assertTrue(scenario.project_readme.startswith("# "))
 
     def test_docker_sandbox_cannot_read_unmounted_host_file(self) -> None:
         with tempfile.TemporaryDirectory() as fixture_tmp:

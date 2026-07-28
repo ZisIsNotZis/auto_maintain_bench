@@ -11,7 +11,7 @@ from harness.bash_sandbox_benchmark import (
     DockerSandbox,
     load_bash_scenarios,
 )
-from harness.contracts import load_benchmark_contract
+from harness.contracts import load_harness_contract
 from harness.maintenance_loop import OpenAIModelTransport
 
 
@@ -28,7 +28,7 @@ def main() -> None:
     parser.add_argument("--max-tokens", type=int, default=2048)
     args = parser.parse_args()
 
-    contract = load_benchmark_contract(ROOT / "benchmarks" / "maintenance_v1")
+    contract = load_harness_contract(ROOT / "harness")
     contract = replace(
         contract,
         system_prompt=args.system.read_text(encoding="utf-8").strip(),

@@ -4,11 +4,11 @@
 
 ```text
 Scenario/project layer  -> real runnable project content
-Agent layer             -> PROMPT.md + maintenance runtime/tool policy
+Harness layer           -> PROMPT.md + maintenance runtime/tool policy
 Benchmark layer         -> scenario orchestration + deterministic scoring only
 ```
 
-Hard rule: benchmark layer must not own prompts. `PROMPT.md` belongs to the agent layer.
+Hard rule: benchmark layer must not own prompts. `PROMPT.md` belongs to the harness layer.
 
 ## 2. Current implementation snapshot
 
@@ -25,6 +25,7 @@ MaintenanceDaemon.run_cycle(telemetry)
   - inject active escalations
   - validate telemetry
   - archive telemetry (timestamped + latest symlink)
+  - write traces/trajectories/logs to /tmp or auto_maintain_bench/log/, never reports/
   - run fresh MaintenanceLoop conversation
   - persist escalation updates
                 |
@@ -36,22 +37,26 @@ WakeupResult
 
 Every cycle is a new chat:
 
-1. agent `PROMPT.md`
+1. harness `PROMPT.md`
 2. project README + MEMORY + current telemetry (user message)
 3. assistant emits exactly one native `bash` tool call per turn
 
 Terminal controls: `everything_ok` / `escalate ...`.
 
-## 5. Target scenario directory contract
+## 5. Canonical scenario directory contract
 
 ```text
-scenarios/<category>/<id>/
-  src/                 # only mounted path visible to the agent runtime
-    README.md
+scenarios/<category>/<ID>/
+  scenario.json        # telemetry + checks + allowed_changes metadata
+  scoring.json         # scoring plan (max class, hierarchy weights)
+  DESIGN.md            # maintainer design notes
+  src/                 # standalone buggy project fixture
+    README.md          # project-facing context shown to the agent
     ...project files...
-  tests/               # hidden from agent, benchmark-only checks
-  scoring.json         # scenario-specific scoring parameters
-  DESIGN.md            # maintainer notes for scenario design/traps
+  tests/               # hidden validator scripts
+    test_fix.sh        # fix verification
+    test_regression.sh # regression prevention
+    test_durability.sh # durability/persistence
 ```
 
 ## 6. Key implementation paths
@@ -64,6 +69,7 @@ scripts/probe_maintenance_scenario.py
 harness/
   maintenance_loop.py
   maintenance_daemon.py
+  rejections/*.json
   telemetry_source.py
   telemetry_archive.py
   bash_sandbox_benchmark.py

@@ -9,6 +9,7 @@ import subprocess
 from typing import Any, Callable, Protocol
 from urllib import error, request
 
+from .rejections import load_rejection_rules, match_rejection
 from .telemetry_archive import TelemetryArchive
 
 
@@ -88,6 +89,9 @@ class MaintenanceLoop:
         self.project_readme_display_path = project_readme_display_path
         self.memory_display_path = memory_display_path
         self.telemetry_display_dir = telemetry_display_dir
+        self.rejection_rules = load_rejection_rules(
+            Path(__file__).resolve().parent / "rejections"
+        )
 
     def run_wakeup(self, telemetry: dict[str, Any]) -> WakeupResult:
         telemetry_path = self.telemetry_archive.store(telemetry)
@@ -108,10 +112,27 @@ class MaintenanceLoop:
         evidence_artifacts_written: set[str] = set()
         state_changes = 0
         last_result: BashResult | None = None
-        consecutive_readonly_successes = 0
         require_terminal = False
         duplicate_attempts = 0
+        consecutive_rereads = 0
+        consecutive_parse_failures = 0
+        consecutive_rejections = 0
+        MAX_REJECTIONS = 3
         for _ in range(self.max_steps):
+            if consecutive_rejections >= MAX_REJECTIONS:
+                level = "uncertain" if state_changes > 0 else "failed"
+                return WakeupResult(
+                    terminal="escalate",
+                    message="model_repeated_rejection_auto_escalated",
+                    escalation_level=level,
+                    escalation_id=_escalation_id(
+                        level,
+                        "model_repeated_rejection_auto_escalated",
+                    ),
+                    messages=tuple(audit_messages),
+                    telemetry_path=telemetry_path,
+                )
+            consecutive_rejections += 1
             messages = truncate_conversation(
                 messages,
                 max_context_tokens=self.max_context_tokens,
@@ -126,6 +147,20 @@ class MaintenanceLoop:
             reasoning_content = str(response.get("reasoning_content", "") or "")
             calls = response.get("tool_calls") or []
             if len(calls) != 1 or not isinstance(calls[0], ToolCall) or calls[0].name != "bash":
+                consecutive_parse_failures += 1
+                if consecutive_parse_failures >= 3:
+                    level = "uncertain" if state_changes > 0 else "failed"
+                    return WakeupResult(
+                        terminal="escalate",
+                        message="model_repeated_empty_responses_auto_escalated",
+                        escalation_level=level,
+                        escalation_id=_escalation_id(
+                            level,
+                            "model_repeated_empty_responses_auto_escalated",
+                        ),
+                        messages=tuple(audit_messages),
+                        telemetry_path=telemetry_path,
+                    )
                 additions = [
                     _assistant_text_message(content, reasoning_content),
                     {
@@ -141,15 +176,27 @@ class MaintenanceLoop:
                 messages.extend(additions)
                 audit_messages.extend(additions)
                 continue
+            consecutive_parse_failures = 0
             call = calls[0]
             command = call.arguments.get("command")
             if not isinstance(command, str) or not command.strip():
+                terminal_hint = (
+                    "Call `everything_ok` now if the repair is verified and complete."
+                    if executed_commands
+                    else "Start with the first command from the README repair sequence."
+                )
                 additions = [
                     _assistant_tool_message(call, content, reasoning_content),
                     _tool_message(
                         call.id,
                         BashResult(2, "", "command must be a non-empty string"),
                     ),
+                    {
+                        "role": "user",
+                        "content": (
+                            f"Your previous message contained an empty command. {terminal_hint}"
+                        ),
+                    },
                 ]
                 messages.extend(additions)
                 audit_messages.extend(additions)
@@ -161,11 +208,12 @@ class MaintenanceLoop:
                 if (
                     kind == "everything_ok"
                     and telemetry_actionable
-                    and (
-                        not executed_commands
-                        or state_changes == 0
-                    )
+                    and not executed_commands
                 ):
+                    tel_dir = (
+                        self.telemetry_display_dir
+                        or str(self.telemetry_archive.root.resolve())
+                    )
                     additions = [
                         _assistant_tool_message(call, content, reasoning_content),
                         _tool_message(
@@ -179,8 +227,10 @@ class MaintenanceLoop:
                         {
                             "role": "user",
                             "content": (
-                                "Do not call everything_ok yet. Current telemetry contains actionable "
-                                "fault signals. Run and verify at least one real state-changing repair "
+                                "Do not call everything_ok yet without investigation. "
+                                f"Check {tel_dir}/ for newer samples — "
+                                "the issue may have resolved between collection ticks. "
+                                "If the latest sample is still actionable, make a repair "
                                 "before terminal."
                             ),
                         },
@@ -209,28 +259,29 @@ class MaintenanceLoop:
                     telemetry_path=telemetry_path,
                 )
             if require_terminal:
-                additions = [
-                    _assistant_tool_message(call, content, reasoning_content),
-                    _tool_message(
-                        call.id,
-                        BashResult(
-                            2,
-                            "",
-                            "non-terminal command rejected after repeated successful read-only verification",
+                # Model was told to terminate but tried a non-terminal command.
+                # Auto-resolve: if changes were made, assume fix is complete.
+                if state_changes > 0:
+                    return WakeupResult(
+                        terminal="everything_ok",
+                        message="auto_everything_ok_after_terminal_required",
+                        escalation_level="",
+                        escalation_id="auto_everything_ok_after_terminal_required",
+                        messages=tuple(audit_messages),
+                        telemetry_path=telemetry_path,
+                    )
+                else:
+                    return WakeupResult(
+                        terminal="escalate",
+                        message="auto_escalated_after_terminal_required",
+                        escalation_level="failed",
+                        escalation_id=_escalation_id(
+                            "failed",
+                            "auto_escalated_after_terminal_required",
                         ),
-                    ),
-                    {
-                        "role": "user",
-                        "content": (
-                            "Do not run more shell commands. Your next bash call must be exactly "
-                            "`everything_ok` if repaired, or exactly "
-                            "`escalate uncertain verification is insufficient`."
-                        ),
-                    },
-                ]
-                messages.extend(additions)
-                audit_messages.extend(additions)
-                continue
+                        messages=tuple(audit_messages),
+                        telemetry_path=telemetry_path,
+                    )
             wrapped_control = _wrapped_terminal_control(command)
             if wrapped_control is not None:
                 additions = [
@@ -257,6 +308,20 @@ class MaintenanceLoop:
                 continue
             reread_warning = self._context_reread_warning(command)
             if reread_warning is not None:
+                consecutive_rereads += 1
+                if consecutive_rereads >= 3:
+                    level = "uncertain" if state_changes > 0 else "failed"
+                    return WakeupResult(
+                        terminal="escalate",
+                        message="model_repeated_reread_auto_escalated",
+                        escalation_level=level,
+                        escalation_id=_escalation_id(
+                            level,
+                            "model_repeated_reread_auto_escalated",
+                        ),
+                        messages=tuple(audit_messages),
+                        telemetry_path=telemetry_path,
+                    )
                 additions = [
                     _assistant_tool_message(call, content, reasoning_content),
                     _tool_message(
@@ -278,19 +343,25 @@ class MaintenanceLoop:
             if command in executed_commands:
                 duplicate_attempts += 1
                 previous = executed_commands[command]
-                warning = (
-                    "Stop. Do not call an ordinary shell command again. Call the bash tool "
-                    "with command exactly `everything_ok` if the cached results verify the "
-                    "repair. Otherwise call the bash tool with command exactly "
-                    "`escalate uncertain verification is insufficient`."
-                    if duplicate_attempts >= 3
-                    else (
-                        "That exact bash command was not executed because it already ran "
-                        "during this maintenance cycle. The tool response repeats its cached "
-                        "prior result. Do not call it again. If existing evidence verifies "
-                        "the repair, finish with everything_ok; otherwise choose a different "
-                        "inspection or repair, or escalate."
+                if duplicate_attempts >= 5:
+                    return WakeupResult(
+                        terminal="escalate",
+                        message="model_repeated_duplicate_commands_auto_escalated",
+                        escalation_level="failed",
+                        escalation_id=_escalation_id(
+                            "failed",
+                            "model_repeated_duplicate_commands_auto_escalated",
+                        ),
+                        messages=tuple(audit_messages),
+                        telemetry_path=telemetry_path,
                     )
+                warning = (
+                    "That exact bash command was not executed because it already ran "
+                    "during this maintenance cycle. The tool response repeats its cached "
+                    "prior result. Do not call it again. Continue with the next literal "
+                    "step from the README sequence, or if the sequence can no longer "
+                    "proceed safely, verify existing evidence, then finish with "
+                    "everything_ok or escalate."
                 )
                 additions = [
                     _assistant_tool_message(call, content, reasoning_content),
@@ -314,26 +385,11 @@ class MaintenanceLoop:
                 messages.extend(additions)
                 audit_messages.extend(additions)
                 continue
-            backup_warning = _missing_backup_warning(command, backed_up_paths)
-            if backup_warning is not None:
-                additions = [
-                    _assistant_tool_message(call, content, reasoning_content),
-                    _tool_message(
-                        call.id,
-                        BashResult(
-                            2,
-                            "",
-                            "persistent file mutation rejected because no maint-backup exists in this cycle",
-                        ),
-                    ),
-                    {
-                        "role": "user",
-                        "content": backup_warning,
-                    },
-                ]
-                messages.extend(additions)
-                audit_messages.extend(additions)
-                continue
+            backup_target = _auto_backup_target(command, backed_up_paths)
+            if backup_target is not None:
+                backup_cmd = f"cp --preserve=all -- {shlex.quote(backup_target)} {shlex.quote(backup_target)}.maint-backup"
+                subprocess.run(backup_cmd, shell=True, capture_output=True, timeout=10)
+                backed_up_paths.add(backup_target)
             host_path_warning = _forbidden_host_path_warning(command)
             if host_path_warning is not None:
                 additions = [
@@ -354,8 +410,8 @@ class MaintenanceLoop:
                 messages.extend(additions)
                 audit_messages.extend(additions)
                 continue
-            cd_warning = _forbidden_cd_sandbox_warning(command)
-            if cd_warning is not None:
+            simple_rejection = match_rejection(command, self.rejection_rules)
+            if simple_rejection is not None:
                 additions = [
                     _assistant_tool_message(call, content, reasoning_content),
                     _tool_message(
@@ -363,12 +419,12 @@ class MaintenanceLoop:
                         BashResult(
                             2,
                             "",
-                            "relative path workflow rejected; use absolute /sandbox paths",
+                            simple_rejection.stderr,
                         ),
                     ),
                     {
                         "role": "user",
-                        "content": cd_warning,
+                        "content": simple_rejection.user_message,
                     },
                 ]
                 messages.extend(additions)
@@ -438,6 +494,8 @@ class MaintenanceLoop:
                 audit_messages.extend(additions)
                 continue
             result = self.command_executor(command)
+            consecutive_rejections = 0
+            duplicate_attempts = 0
             last_result = result
             executed_commands[command] = result
             backed_up = _backup_source_path(command)
@@ -448,35 +506,18 @@ class MaintenanceLoop:
                 evidence_artifacts_written.add(evidence_path)
             if result.exit_code == 0 and _is_state_changing_command(command):
                 state_changes += 1
-            if result.exit_code == 0 and not _is_state_changing_command(command):
-                consecutive_readonly_successes += 1
-            else:
-                consecutive_readonly_successes = 0
             additions = [
                 _assistant_tool_message(call, content, reasoning_content),
                 _tool_message(call.id, result),
             ]
-            if consecutive_readonly_successes >= 4:
-                require_terminal = True
-                additions.append(
-                    {
-                        "role": "user",
-                        "content": (
-                            "You now have repeated successful read-only verification evidence. "
-                            "Do not run more inspection commands. Your next bash call must be "
-                            "exactly `everything_ok` if repaired, or exactly "
-                            "`escalate uncertain verification is insufficient` if not."
-                        ),
-                    }
-                )
             messages.extend(additions)
             audit_messages.extend(additions)
         return WakeupResult(
             terminal="escalate",
             message="model_exceeded_max_steps_without_terminal_command",
-            escalation_level="failed",
+            escalation_level="uncertain" if state_changes > 0 else "failed",
             escalation_id=_escalation_id(
-                "failed",
+                "uncertain" if state_changes > 0 else "failed",
                 "model_exceeded_max_steps_without_terminal_command",
             ),
             messages=tuple(audit_messages),
@@ -504,13 +545,135 @@ class MaintenanceLoop:
             or str(self.project_readme_path.resolve())
         )
         memory_path = self.memory_display_path or str(self.memory_path.resolve())
+        highlights = self._extract_telemetry_highlights(telemetry)
+        highlights_block = f"\n## Telemetry Highlights\n{highlights}\n" if highlights else ""
         return (
             f"# Project README\nSource: {readme_path}\n\n{readme}\n\n"
             "# Memory\n"
             f"Source: {memory_path}\n\n{memory or '(empty)'}\n\n"
-            "# Current telemetry\n"
+            "# Current telemetry"
+            f"{highlights_block}\n"
             f"{json.dumps(telemetry, ensure_ascii=True, indent=2, sort_keys=True)}"
         )
+
+    @staticmethod
+    def _extract_telemetry_highlights(telemetry: dict[str, Any]) -> str:
+        """Extract a plain-text summary of the most important telemetry signals.
+
+        This helps smaller models that struggle to parse deeply nested JSON.
+        Formats:
+          - Service health summary for every service
+          - stdout+stderr from all services (operator requests, errors, diagnostics)
+          - Critical/error/warning events (service + host)
+          - Resource pressure signals (CPU, memory, filesystem, connectivity)
+          - Request error rates > 10%
+          - Notable outlier processes
+        """
+        lines: list[str] = []
+
+        # Track which services need attention
+        services = telemetry.get("services", [])
+        host_mem_total = telemetry.get("memory", {}).get("total_bytes", 1)
+
+        for svc in services:
+            name = svc.get("name", "?")
+            state = svc.get("state", "?")
+            health = svc.get("health", "?")
+            restart_count = svc.get("restart_count", 0)
+            uptime_s = svc.get("uptime_s", 0)
+            cpu_pct = svc.get("cpu_pct", 0)
+            mem_bytes = svc.get("memory_bytes", 0)
+            mem_pct = svc.get("memory_pct", round(100.0 * mem_bytes / host_mem_total, 1)) if mem_bytes else 0
+
+            # Always show service header for any non-healthy service
+            is_unhealthy = (state != "running" or health != "healthy" or restart_count > 0)
+            if is_unhealthy:
+                uptime_str = f"{uptime_s // 3600}h{(uptime_s % 3600) // 60}m" if uptime_s else "?"
+                lines.append(f"- Service {name}: state={state} health={health} uptime={uptime_str} restart_count={restart_count} cpu={cpu_pct}% mem={mem_pct}%")
+
+            # stdout lines (operator requests, startup messages, status)
+            stdout = svc.get("stdout", {})
+            for out_line in stdout.get("lines", []):
+                text = out_line[:200]
+                if is_unhealthy or any(kw in text.lower() for kw in ("operator request", "approved", "request:", "pending")):
+                    lines.append(f"  stdout: {text}")
+
+            # stderr lines (the most actionable diagnostic signals)
+            stderr = svc.get("stderr", {})
+            for err_line in stderr.get("lines", []):
+                lines.append(f"  stderr: {err_line[:200]}")
+
+            # Events (critical, error, warning)
+            for event in svc.get("events", []):
+                sev = event.get("severity", "")
+                if sev in ("critical", "error", "warning"):
+                    lines.append(f"  [{sev}] {event.get('code','?')}: {event.get('message','?')[:200]}")
+
+            # Request metrics (if available)
+            req = svc.get("requests")
+            if isinstance(req, dict):
+                err_pct = req.get("error_pct", 0)
+                rate = req.get("rate_s", 0)
+                lat_p50 = req.get("latency_p50_ms", 0)
+                lat_p95 = req.get("latency_p95_ms", 0)
+                inflight = req.get("inflight", 0)
+                if err_pct > 10 or lat_p95 > 1000 or inflight > 10:
+                    lines.append(f"  requests: {rate}/s errors={err_pct}% p50={lat_p50}ms p95={lat_p95}ms inflight={inflight}")
+
+        # Host-level events
+        for event in telemetry.get("host_events", []):
+            sev = event.get("severity", "")
+            if sev in ("critical", "error", "warning"):
+                lines.append(f"- [host] [{sev}] {event.get('code','?')}: {event.get('message','?')[:200]}")
+
+        # Connectivity
+        conn = telemetry.get("connectivity", {})
+        if conn.get("dns_resolution_ok") is False:
+            lines.append("- connectivity: dns_resolution_ok=false")
+        if conn.get("default_route_ok") is False:
+            lines.append("- connectivity: default_route_ok=false")
+
+        # Filesystem alerts (>80% warning, >=95% critical)
+        for fs in telemetry.get("filesystems", []):
+            used = fs.get("used_pct", 0)
+            mount = fs.get("mount", "?")
+            if used >= 95:
+                lines.append(f"- filesystem {mount}: {used}% used (CRITICAL)")
+            elif used >= 80:
+                lines.append(f"- filesystem {mount}: {used}% used (warning)")
+
+        # Memory alerts (>80% warning, >=90% critical)
+        mem = telemetry.get("memory", {})
+        used_pct = mem.get("used_pct", 0)
+        if used_pct >= 90:
+            lines.append(f"- memory: {used_pct}% used (CRITICAL)")
+        elif used_pct >= 80:
+            lines.append(f"- memory: {used_pct}% used (warning)")
+        if mem.get("oom_kills_since_boot", 0) > 0:
+            lines.append(f"- memory: {mem['oom_kills_since_boot']} OOM kills since boot")
+
+        # CPU alerts (>80% warning, >=95% critical)
+        cpu = telemetry.get("cpu", {})
+        cpu_used = cpu.get("usage_pct", 0)
+        if cpu_used >= 95:
+            lines.append(f"- cpu: {cpu_used}% utilization (CRITICAL)")
+        elif cpu_used >= 80:
+            lines.append(f"- cpu: {cpu_used}% utilization (warning)")
+
+        # Notable processes (all are significant)
+        for proc in telemetry.get("notable_processes", []):
+            pname = proc.get("name", "?")
+            reasons = ", ".join(proc.get("reasons", []))
+            cpu_p = proc.get("cpu_pct", 0)
+            mem_b = proc.get("memory_bytes", 0)
+            mem_mb = round(mem_b / 1048576, 1) if mem_b else 0
+            lines.append(f"- notable process: {pname} cpu={cpu_p}% mem={mem_mb}MB reasons=[{reasons}]")
+
+        # Escalating issues from prior cycles
+        for esc in telemetry.get("escalating", []):
+            lines.append(f"- escalating: {esc.get('message','?')[:200]}")
+
+        return "\n".join(lines)
 
     def _context_reread_warning(self, command: str) -> str | None:
         paths = {
@@ -750,13 +913,18 @@ def _tool_message(call_id: str, result: BashResult) -> dict[str, Any]:
     }
 
 
+_BACKUP_SUFFIXES = (".maint-backup", ".backup", ".bak")
+
+
 def _backup_source_path(command: str) -> str | None:
     try:
         parts = shlex.split(command)
     except ValueError:
         return None
     for src, dst in _iter_cp_pairs(parts):
-        if src.startswith("/sandbox/etc/") and dst == f"{src}.maint-backup":
+        if src.startswith("/sandbox/etc/") and any(
+            dst == f"{src}{suffix}" for suffix in _BACKUP_SUFFIXES
+        ):
             return src
     return None
 
@@ -770,35 +938,41 @@ def _mutation_target_under_etc(command: str) -> str | None:
         return None
     if parts[0] == "sed" and "-i" in parts and parts[-1].startswith("/sandbox/etc/"):
         return parts[-1]
-    if parts[0] == "cat" and ">" in parts:
-        index = parts.index(">")
-        if index + 1 < len(parts) and parts[index + 1].startswith("/sandbox/etc/"):
-            return parts[index + 1]
-    if ">" in parts:
-        index = parts.index(">")
-        if index + 1 < len(parts) and parts[index + 1].startswith("/sandbox/etc/"):
-            return parts[index + 1]
+    if parts[0] == "cat":
+        for redirect in (">", ">>"):
+            if redirect in parts:
+                index = parts.index(redirect)
+                if index + 1 < len(parts) and parts[index + 1].startswith("/sandbox/etc/"):
+                    return parts[index + 1]
+    # Generic redirect check (echo, printf, etc.)
+    for redirect in (">", ">>"):
+        if redirect in parts:
+            index = parts.index(redirect)
+            if (
+                index + 1 < len(parts)
+                and parts[index + 1].startswith("/sandbox/etc/")
+            ):
+                return parts[index + 1]
     if parts[0] == "mv" and len(parts) >= 3 and parts[-1].startswith("/sandbox/etc/"):
         return parts[-1]
-    if parts[0] == "cp" and len(parts) >= 3 and parts[-1].startswith("/sandbox/etc/"):
-        dst = parts[-1]
-        src = parts[-2]
-        if dst != f"{src}.maint-backup":
-            return dst
+    # Use _iter_cp_pairs to correctly identify cp src/dst pairs,
+    # even when commands are chained with && / ||
+    if parts[0] == "cp":
+        for src, dst in _iter_cp_pairs(parts):
+            if dst.startswith("/sandbox/etc/") and not any(dst == f"{src}{suffix}" for suffix in _BACKUP_SUFFIXES):
+                return dst
+        return None
     return None
 
 
-def _missing_backup_warning(command: str, backed_up_paths: set[str]) -> str | None:
+def _auto_backup_target(command: str, backed_up_paths: set[str]) -> str | None:
+    """Return the file path that needs auto-backup before mutation, or None."""
     target = _mutation_target_under_etc(command)
     if target is None:
         return None
     if target in backed_up_paths:
         return None
-    return (
-        "That mutation was not executed. Before editing a persistent file under /sandbox/etc/, "
-        "create a maint-backup in this cycle with: "
-        f"`cp --preserve=all -- {target} {target}.maint-backup`."
-    )
+    return target
 
 
 def _is_restore_command(command: str) -> bool:
@@ -807,7 +981,9 @@ def _is_restore_command(command: str) -> bool:
     except ValueError:
         return False
     for src, dst in _iter_cp_pairs(parts):
-        if src.endswith(".maint-backup") and dst.startswith("/sandbox/etc/"):
+        if dst.startswith("/sandbox/etc/") and any(
+            src.endswith(suffix) for suffix in _BACKUP_SUFFIXES
+        ):
             return True
     return False
 
@@ -889,25 +1065,17 @@ def _forbidden_host_path_warning(command: str) -> str | None:
     return None
 
 
-def _forbidden_cd_sandbox_warning(command: str) -> str | None:
-    lowered = command.lower()
-    if lowered.startswith("cd /sandbox") or "&& cd /sandbox" in lowered or "cd /sandbox &&" in lowered:
-        return (
-            "That command was not executed. Do not `cd /sandbox` and switch to relative paths. "
-            "Use absolute `/sandbox/...` paths exactly as written in README."
-        )
-    return None
-
-
 def _temp_cache_backup_warning(command: str) -> str | None:
     try:
         parts = shlex.split(command)
     except ValueError:
         return None
     for src, dst in _iter_cp_pairs(parts):
-        if src.startswith("/sandbox/var/tmp/") and dst.endswith(".maint-backup"):
+        if src.startswith("/sandbox/var/tmp/") and any(
+            dst.endswith(suffix) for suffix in _BACKUP_SUFFIXES
+        ):
             return (
-                "That command was not executed. Do not copy temporary cache files to `.maint-backup`. "
+                "That command was not executed. Do not copy temporary cache files to a backup file. "
                 "For temporary cache cleanup, preserve evidence by writing one backup list file "
                 "(for example `find ... > ...maint-backup-list`) and then delete the cache files."
             )
@@ -986,6 +1154,13 @@ def _terminal_name(value: str) -> str:
 def _escalation_id(level: str | None, message: str) -> str:
     digest = hashlib.sha256(f"{level}:{message}".encode("utf-8")).hexdigest()[:12]
     return f"esc_{digest}"
+
+
+def _slug(text: str, max_len: int = 40) -> str:
+    """Slugify text for use in escalation message IDs."""
+    slug = text.strip()[:max_len]
+    slug = slug.replace(" ", "_")
+    return slug
 
 
 def _telemetry_has_actionable_signals(telemetry: dict[str, Any]) -> bool:

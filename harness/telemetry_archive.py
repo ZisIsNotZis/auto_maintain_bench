@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 import json
 import os
 from pathlib import Path
+import threading
 import time
 from typing import Any
 
@@ -21,6 +22,7 @@ class TelemetryArchive:
         self.root = root
         self.max_files = max_files
         self.max_age_s = max_age_s
+        self._lock = threading.Lock()
 
     def store(
         self,
@@ -31,27 +33,17 @@ class TelemetryArchive:
         self.root.mkdir(parents=True, exist_ok=True)
         timestamp = _parse_time(observed_at or str(telemetry.get("observed_at", "")))
         stem = timestamp.strftime("%Y%m%dT%H%M%S.%fZ")
-        path = self._unique_path(stem)
-        temporary = path.with_suffix(".tmp")
-        temporary.write_text(
-            json.dumps(telemetry, indent=2, ensure_ascii=True, sort_keys=True) + "\n",
-            encoding="utf-8",
-        )
-        os.replace(temporary, path)
-        self._replace_latest(path)
+        with self._lock:
+            path = self._unique_path(stem)
+            temporary = path.with_suffix(".tmp")
+            temporary.write_text(
+                json.dumps(telemetry, indent=2, ensure_ascii=True, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+            os.replace(temporary, path)
+            self._replace_latest(path)
         self.rotate()
         return path
-
-    def rotate(self) -> None:
-        files = self._data_files()
-        if self.max_age_s is not None:
-            cutoff = time.time() - self.max_age_s
-            for path in list(files):
-                if path.stat().st_mtime < cutoff:
-                    path.unlink(missing_ok=True)
-            files = self._data_files()
-        for path in files[: max(0, len(files) - self.max_files)]:
-            path.unlink(missing_ok=True)
 
     def _data_files(self) -> list[Path]:
         return sorted(
@@ -74,6 +66,18 @@ class TelemetryArchive:
         temporary.unlink(missing_ok=True)
         temporary.symlink_to(path.name)
         os.replace(temporary, latest)
+
+    def rotate(self) -> None:
+        """Remove telemetry files beyond max age and count."""
+        files = self._data_files()
+        if self.max_age_s is not None:
+            cutoff = time.time() - self.max_age_s
+            for path in list(files):
+                if path.stat().st_mtime < cutoff:
+                    path.unlink(missing_ok=True)
+            files = self._data_files()
+        for path in files[: max(0, len(files) - self.max_files)]:
+            path.unlink(missing_ok=True)
 
 
 def _parse_time(value: str) -> datetime:

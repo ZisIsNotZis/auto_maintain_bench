@@ -9,12 +9,16 @@ This folder contains both benchmark references and active lifecycle design docs.
 - `harness_migration_plan.md` — migration status, pilot gate, and next-phase rules.
 - `future_trigger_engine.md` — future trigger-system design (not implemented yet).
 
-Current intent: design/docs alignment first, migration work paused until review.
+Current intent: layer-first migration cleanup, then testcase migration gates.
+
+Trace/trajectory/log output should live under `/tmp` or `auto_maintain_bench/log/`, not `reports/`.
 
 ## Benchmark reference docs
 
 - `scenario_catalog.md` — scenario inventory and category coverage.
 - `scoring_rubric.md` — deterministic scoring model.
+- `FAIL_PATTERNS.md` — checklist of model failure modes with fix traces.
+- `TELEMETRY.md` — telemetry design spec (fields, trend formats, highlight extraction).
 
 ## ADRs
 

@@ -5,33 +5,48 @@ This catalog is intentionally broad. It is a handoff document for weaker impleme
 Legend:
 
 - **T/P diff**: temporary/permanent fix difficulty: `L` low, `M` medium, `H` high, `I` impossible/should not fix on edge.
-- **Max**: scoring ceiling class from `docs/scoring_rubric.md`.
+- **Max**: scoring ceiling class from hierarchy below.
+
+## Scoring Hierarchy
+
+Each scenario is scored at the highest level the agent demonstrably achieves:
+
+| Level | Score | Evidence |
+|-------|-------|----------|
+| higher_level_regression | 0.00 | Higher-level regression tests fail after agent action |
+| noop | 0.05 | No state changes, no terminal |
+| same_level_regression | 0.10 | Fix/durability tests fail worse than baseline |
+| sense_problem | 0.20 | Agent escalated/inspected appropriately |
+| find_problem | 0.35 | Agent attempted correct fix but tests still fail |
+| find_cause | 0.50 | Partial fix progress, some fix tests pass |
+| low_level_regression | 0.60 | Fix + durability pass, regression test fails |
+| temporary_fix | 0.75 | Fix + regression pass, durability fails |
+| permanent_fix | 1.00 | Fix + regression + durability all pass |
+
+Safety caps: unexpected changes or false `everything_ok` caps max score at 0.20. `rollback_failed` escalation scores 0.00.
 
 ## Implementation Rules for All Scenarios
 
 1. Each scenario is a real runnable project, with project-facing content under `src/` only.
 2. Agent runtime visibility is limited to `src/`; benchmark-only assets stay outside `src/`.
 3. Every scenario must define benchmark-facing artifacts:
-   - hidden `tests/` validators
-   - `scoring.json` parameters consumed by the benchmark layer
-   - optional maintainer `DESIGN.md` notes (not visible to agent)
-4. Every scenario must define:
-   - fault/request rounds
-   - expected problem type/subtype/root-cause label
-   - required evidence keys
-   - allowed and disallowed actions
-   - fix validators
-   - durability validators
-   - regression validators
-   - max score class
-5. Do not require LLM-as-judge.
-6. Keep edge-side realism: if source code is unavailable or binary-only, max should usually be `report` or `fix_temporary`.
+   - `scenario.json` — telemetry, fixture config, scoring checks
+   - `scoring.json` — max score class and hierarchy metadata
+   - `tests/test_fix.sh` — fix verification tests
+   - `tests/test_regression.sh` — regression prevention tests
+   - `tests/test_durability.sh` — durability/persistence tests
+   - `DESIGN.md` — maintainer design notes (optional but recommended)
+4. No scenario may contain LLM-as-judge scoring.
+5. Edge-side realism: if source code is unavailable or binary-only, max should usually be `report` or `fix_temporary`.
+6. `src/README.md` must not leak problem information in the title or announce the bug directly.
+7. `/sandbox/` paths must not appear in `src/` files (the harness projects the real writable path at runtime).
+8. Path convention: scenarios live at `scenarios/<category>/<ID>/` relative to repo root.
 
 ## A. CPU and Scheduling
 
 | ID | Scenario | Significance | T/P diff | Max | Implementation and scoring notes |
 |---|---|---|---|---|---|
-| CPU-001 | Bad worker multiplier saturates CPU | Common config regression; easy permanent edge fix | L/L | fix_permanent | Config starts at `worker_multiplier=32`; metrics cross `cpu_pct=99`; fix via `throttle_concurrency`/config edit; score durability by persisted multiplier. |
+| CPU-001 | Bad worker multiplier saturates CPU | Common config regression; easy permanent edge fix | L/L | fix_permanent | Config starts at `worker_multiplier=32`; metrics cross `cpu_pct=99`; fix via config edit; score durability by persisted multiplier. |
 | CPU-002 | Runaway busy loop worker | Tests distinguishing code bug vs config | M/H | fix_temporary | Simulate process high CPU + log "loop iteration"; temporary restart/disable worker ok; permanent requires patch if script source available. |
 | CPU-003 | CPU quota too low in container | Edge constrained deployment realism | M/M | fix_permanent | cgroup quota signal low; health slow; fix by reducing concurrency or guide operator to raise quota; score based on allowed edge artifact. |
 | CPU-004 | Cron overlap causes CPU pileup | Tests timed-output + process inspection | M/M | fix_permanent | Multiple job instances; fix lockfile/schedule spacing; validators check one active job and next tick works. |
@@ -299,19 +314,24 @@ Legend:
 
 When implementing any row above:
 
-1. Create `scenarios/<category>/<ID>.json`.
-2. Add baseline healthy round(s), then fault/request rounds.
-3. Add expected labels:
+1. Create `scenarios/<category>/<ID>/scenario.json`.
+2. Create `scenarios/<category>/<ID>/src/` with a standalone buggy project and `src/README.md`.
+3. Create `scenarios/<category>/<ID>/tests/` with test scripts:
+   - `test_fix.sh` — fix verification
+   - `test_regression.sh` — regression prevention
+   - `test_durability.sh` — durability/persistence
+4. Create `scenarios/<category>/<ID>/scoring.json` with max score class and hierarchy.
+5. Create `scenarios/<category>/<ID>/DESIGN.md` with maintainer notes.
+6. Add expected labels:
    - `problem_type`
    - `subtype`
    - `root_cause_label`
-   - accepted aliases if needed.
-4. Add required evidence keys.
-5. Add allowed/disallowed actions.
-6. Add validators:
+7. Add required evidence keys.
+8. Add allowed/disallowed actions.
+9. Add validators:
    - fault removed/request satisfied
    - API/E2E still passes
    - durability/recurrence check if applicable.
-7. Add one regression test if the scenario requires new harness behavior.
-8. Run baseline agent and at least one LLM adapter.
-9. Update summary report.
+10. Add one harness regression test if the scenario requires new harness behavior.
+11. Run baseline agent and at least one LLM adapter.
+12. Update summary report.

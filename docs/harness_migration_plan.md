@@ -5,11 +5,11 @@
 1. Pilot first: migrate/validate a few scenarios one by one.
 2. Ask for explicit confirmation before broad parallel migration.
 3. Delete deprecated paths after replacement is stable.
-4. Keep benchmark/agent/scenario boundaries clear (see `design.md`).
+4. Keep benchmark/harness/scenario boundaries clear (see `design.md`).
 
 ## Current phase
 
-**Paused for design alignment.** No migration execution should start until doc review is approved.
+**Migration in progress (layer-first).** Deprecated legacy benchmark stack is being removed before testcase-by-testcase migration gates.
 
 ## Current status
 
@@ -20,7 +20,7 @@
 - Prompt composition is unified to `PROMPT.md + per-case README + MEMORY + telemetry`.
 - Native bash benchmark is the default runner (`run.py`).
 - Pilot scenarios (`CPU-001`, `DISK-001`, `CFG-001`) are migrated to
-  `scenario.json + README.md`.
+  `scenario.json + src/README.md`.
 
 ### In progress (after unpause)
 
@@ -29,8 +29,13 @@
 - Cross-model robustness (`Qwen3.5-0.8B`, `MiniCPM5-1B`) on basic `-001` cases.
 - Boundary migration to target layer split:
   - benchmark layer without prompts
-  - agent layer owning `PROMPT.md`
-  - scenarios as real project repos (`src/`, hidden `tests/`, `scoring.json`, `DESIGN.md`)
+  - harness layer owning `PROMPT.md`
+  - canonical scenario pack under `scenarios/<category>/<ID>/`
+- Legacy cleanup:
+  - deleted retired legacy runner stack and legacy benchmark assets
+  - removed model-audit-only scenario trees
+  - removed legacy plugin-tool adapter surface
+  - extracted simple command rejections to `harness/rejections/*.json`
 
 ### Deferred until confirmation (still blocked)
 
@@ -60,7 +65,7 @@ After pilot gate approval:
 
 ```bash
 PYTHONPATH=. ../.venv/bin/python -m pytest tests/test_harness_architecture.py tests/test_bash_sandbox_benchmark.py -q
-PYTHONPATH=. ../.venv/bin/python scripts/probe_maintenance_scenario.py --base-url <url> --scenario CPU-001 --system <agent-layer-PROMPT.md>
-PYTHONPATH=. ../.venv/bin/python scripts/probe_maintenance_scenario.py --base-url <url> --scenario DISK-001 --system <agent-layer-PROMPT.md>
-PYTHONPATH=. ../.venv/bin/python scripts/probe_maintenance_scenario.py --base-url <url> --scenario CFG-001 --system <agent-layer-PROMPT.md>
+PYTHONPATH=. ../.venv/bin/python scripts/probe_maintenance_scenario.py --base-url <url> --scenario CPU-001 --system <harness-layer-PROMPT.md>
+PYTHONPATH=. ../.venv/bin/python scripts/probe_maintenance_scenario.py --base-url <url> --scenario DISK-001 --system <harness-layer-PROMPT.md>
+PYTHONPATH=. ../.venv/bin/python scripts/probe_maintenance_scenario.py --base-url <url> --scenario CFG-001 --system <harness-layer-PROMPT.md>
 ```

@@ -7,29 +7,18 @@ from typing import Any
 
 
 @dataclass(frozen=True)
-class BenchmarkContract:
-    id: str
+class HarnessContract:
     root: Path
-    manifest: dict[str, Any]
     system_prompt: str
     bash_tool: dict[str, Any]
 
 
-def load_benchmark_contract(root: Path) -> BenchmarkContract:
-    manifest = _load_json(root / "manifest.json")
-    return BenchmarkContract(
-        id=str(manifest["id"]),
+def load_harness_contract(root: Path) -> HarnessContract:
+    return HarnessContract(
         root=root,
-        manifest=manifest,
-        system_prompt=(root / str(manifest["system_prompt"])).read_text(encoding="utf-8").strip(),
-        bash_tool=_load_json(root / str(manifest["bash_tool"])),
+        system_prompt=(root / "PROMPT.md").read_text(encoding="utf-8").strip(),
+        bash_tool=_load_json(root / "bash_tool.schema.json"),
     )
-
-
-def load_prompt_catalog(root: Path) -> dict[str, Any]:
-    return _load_json(root / "prompts" / "legacy_protocol.json")
-
-
 def load_grammar(root: Path, name: str) -> str:
     return (root / "schemas" / f"{name}.gbnf").read_text(encoding="utf-8").strip()
 
@@ -90,6 +79,26 @@ def validate_telemetry(
                 observed_at=observed_at,
                 path=f"services[{index}]",
             )
+        if "memory_pct" in service:
+            val = service["memory_pct"]
+            if not isinstance(val, (int, float)):
+                raise ValueError(f"services[{index}].memory_pct must be numeric")
+        if "last_output_at" in service:
+            _parse_timestamp(str(service["last_output_at"]), f"services[{index}].last_output_at")
+        for field_name in ("stdout", "stderr"):
+            log_obj = service.get(field_name)
+            if isinstance(log_obj, dict):
+                if "new_line_count" in log_obj and not isinstance(log_obj["new_line_count"], int):
+                    raise ValueError(f"services[{index}].{field_name}.new_line_count must be an int")
+                if "lines" in log_obj and not isinstance(log_obj["lines"], list):
+                    raise ValueError(f"services[{index}].{field_name}.lines must be an array")
+        req = service.get("requests")
+        if isinstance(req, dict):
+            for key in ("rate_s", "error_pct", "latency_p50_ms", "latency_p95_ms", "latency_p99_ms"):
+                if key in req and not isinstance(req[key], (int, float)):
+                    raise ValueError(f"services[{index}].requests.{key} must be numeric")
+            if "error_pct_trend" in req:
+                _validate_trend(req, current_key="error_pct", trend_key="error_pct_trend", observed_at=observed_at, path=f"services[{index}].requests")
         queue = service.get("queue")
         if isinstance(queue, dict):
             _validate_trend(
@@ -99,6 +108,10 @@ def validate_telemetry(
                 observed_at=observed_at,
                 path=f"services[{index}].queue",
             )
+    # Validate notable_processes if present
+    for index, proc in enumerate(telemetry.get("notable_processes", [])):
+        if not isinstance(proc, dict):
+            raise ValueError(f"notable_processes[{index}] must be an object")
 
 
 def _load_json(path: Path) -> Any:

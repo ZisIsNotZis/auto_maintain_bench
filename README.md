@@ -20,8 +20,9 @@ wrapper.
 ## Benchmark
 
 The active suite contains 175 production-relevant scenarios across 15
-categories. Five wrapper/adapter-only legacy cases are explicitly retired in
-`benchmarks/maintenance_v1/obsolete_scenarios.json`.
+categories.
+`scenarios/` is the canonical scenario corpus; the benchmark runner evaluates
+the runtime behavior owned by `harness/`.
 
 Every scenario provides:
 
@@ -46,14 +47,14 @@ Scoring uses observed effects rather than claimed diagnosis:
 
 ## Run the benchmark
 
-Local GGUF; `run.py` manages CPU-only llama-server:
+Local GGUF; `run.py` can manage a local llama-server process:
 
 ```bash
 cd auto_maintain_bench
 python3 run.py \
   --model ./Qwen3.5-0.8B-UD-IQ3_XXS.gguf \
   --scenario CPU-001 \
-  --output reports/qwen_cpu001.json
+  --output /tmp/qwen_cpu001.json
 ```
 
 Existing OpenAI-compatible endpoint:
@@ -62,7 +63,7 @@ Existing OpenAI-compatible endpoint:
 python3 run.py \
   --model tiny-model \
   --base-url http://127.0.0.1:8091/v1 \
-  --output reports/full_native_bash.json
+  --output /tmp/full_native_bash.json
 ```
 
 Repeat `--scenario` to select multiple scenarios. Without it, all active
@@ -71,7 +72,7 @@ scenarios run.
 ## Run the production loop
 
 ```bash
-python3 maintain.py \
+python3 harness/run.py \
   --model ./Qwen3.5-0.8B-UD-IQ3_XXS.gguf \
   --telemetry-file benchmarks/maintenance_v1/examples/wakeup.json \
   --once
@@ -94,25 +95,28 @@ speculation for matching MTP models. It does not force CPU mode.
 ## Layout
 
 ```text
-benchmarks/maintenance_v1/
-  manifest.json
-  prompts/PROMPT.md
-  schemas/
-    bash_tool.schema.json
-  scenarios/<category>/<ID>/scenario.json
-  scenarios/<category>/<ID>/README.md
-  obsolete_scenarios.json
+scenarios/
+  <category>/<ID>/scenario.json   # telemetry + check metadata
+  <category>/<ID>/scoring.json    # scoring plan (max class, hierarchy)
+  <category>/<ID>/DESIGN.md       # maintainer design notes
+  <category>/<ID>/src/README.md   # project-facing docs
+  <category>/<ID>/src/...         # project fixture files
+  <category>/<ID>/tests/          # hidden test scripts (not visible to agent)
+    test_fix.sh                   # fix verification
+    test_regression.sh            # regression prevention
+    test_durability.sh            # durability/persistence
 
 harness/
-  maintenance_loop.py
-  maintenance_daemon.py
-  bash_sandbox_benchmark.py
-  telemetry_archive.py
+  PROMPT.md                       # system prompt
+  bash_tool.schema.json           # native tool contract
+  run.py                          # production periodic loop
+  maintenance_loop.py             # core loop
+  maintenance_daemon.py           # daemon wrapper
+  bash_sandbox_benchmark.py       # benchmark harness
+  telemetry_archive.py            # telemetry storage
 
-run.py                 # native bash benchmark
-maintain.py            # production periodic telemetry loop
-run_legacy.py          # retired JSON-decision benchmark
-run_legacy_matrix.py   # retired adapter matrix
+benchmark/run.py                  # CLI benchmark entrypoint
+maintain.py                       # production daemon entrypoint
 ```
 
 See `docs/harness_project_layout.md` and
