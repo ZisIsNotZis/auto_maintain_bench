@@ -19,7 +19,9 @@ wrapper.
 
 ## Benchmark
 
-The active suite contains 175 production-relevant scenarios across 15
+## Benchmark
+
+The active suite contains 178 production-relevant scenarios across 15
 categories.
 `scenarios/` is the canonical scenario corpus; the benchmark runner evaluates
 the runtime behavior owned by `harness/`.
@@ -47,12 +49,12 @@ Scoring uses observed effects rather than claimed diagnosis:
 
 ## Run the benchmark
 
-Local GGUF; `run.py` can manage a local llama-server process:
+Local GGUF; `benchmark/run.py` can manage a local llama-server process:
 
 ```bash
 cd auto_maintain_bench
-python3 run.py \
-  --model ./Qwen3.5-0.8B-UD-IQ3_XXS.gguf \
+python3 benchmark/run.py \
+  --model ./Qwen3.5-2B-UD-Q4_K_XL.gguf \
   --scenario CPU-001 \
   --output /tmp/qwen_cpu001.json
 ```
@@ -60,7 +62,7 @@ python3 run.py \
 Existing OpenAI-compatible endpoint:
 
 ```bash
-python3 run.py \
+python3 benchmark/run.py \
   --model tiny-model \
   --base-url http://127.0.0.1:8091/v1 \
   --output /tmp/full_native_bash.json
@@ -68,6 +70,17 @@ python3 run.py \
 
 Repeat `--scenario` to select multiple scenarios. Without it, all active
 scenarios run.
+
+## Latest Results
+
+| Version | Prompt | Model | Score |
+|---|---|---|---|
+| v8 | Softened Step 8, diagnostic workflow, Rules 3/12/14/15 | Qwen3.5-2B-UD-Q4_K_XL | 31.94% |
+| v7 | Reverted Step 7/8, diagnostic workflow, Rules 3/12/14/15 | Qwen3.5-2B-UD-Q4_K_XL | 28.60% |
+| v6 | Enriched diagnostic workflow, hard Step 8 guard, Rules 3/12/14/15 | Qwen3.5-2B-UD-Q4_K_XL | 32.58% |
+
+Full run at `--concurrency 4 --temperature 0.0`. See `docs/FAIL_PATTERNS.md` for
+known failure modes and `CLAUDE.md` for detailed analysis.
 
 ## Run the production loop
 
@@ -90,7 +103,9 @@ PORT=8091 ./scripts/start_llama_server.sh /path/to/model.gguf
 ```
 
 The launcher uses a 16384-token context by default and enables Qwen MTP
-speculation for matching MTP models. It does not force CPU mode.
+speculation for matching MTP models. For full-benchmark runs, `--ctx-size 32768`
+is recommended to prevent context exhaustion on 30+ turn trajectories. The
+launcher does not force CPU mode.
 
 ## Layout
 
