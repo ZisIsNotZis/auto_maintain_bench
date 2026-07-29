@@ -5,6 +5,7 @@ import argparse
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextlib import nullcontext
 from dataclasses import asdict, dataclass
+import hashlib
 import json
 from pathlib import Path
 import statistics
@@ -25,6 +26,73 @@ from harness.maintenance_loop import ModelTransport, OpenAIModelTransport
 ROOT = Path(__file__).resolve().parent
 
 _print_lock = threading.Lock()
+
+
+def _parse_model_path(model: str) -> tuple[str, str]:
+    """Parse model path into (model_name, quant).
+
+    Local GGUF: 'Qwen3.5-2B-UD-Q4_K_XL.gguf' → ('Qwen3.5-2B-UD', 'Q4_K_XL')
+    Remote: 'tiny-model' → ('tiny-model', 'unknown')
+    """
+    path = Path(model)
+    stem = path.stem  # removes .gguf
+    parts = stem.split("-")
+    if len(parts) >= 2 and ("K_" in parts[-1] or "I" in parts[-1] or "IQ" in parts[-1]):
+        # Looks like a quant suffix
+        quant = parts[-1]
+        model_name = "-".join(parts[:-1])
+    else:
+        model_name = stem
+        quant = "unknown"
+    return model_name, quant
+
+
+def _save_trajectory(
+    row: dict[str, object],
+    *,
+    trajectory_dir: Path,
+    model_name: str,
+    quant: str,
+    version: str,
+    temperature: float,
+    force: bool,
+) -> None:
+    """Save a scenario trajectory to disk. Skip if already exists unless force."""
+    # Build path: <dir>/<model_name>/<quant>/<version>/<scenario_id>/<temp>.json
+    sid = str(row["scenario_id"])
+    temp_str = f"t{temperature}".replace(".", "_")
+    traj_path = trajectory_dir / model_name / quant / version / sid / f"{temp_str}.json"
+
+    if traj_path.exists() and not force:
+        eprint(f"  trajectory exists, skipping: {traj_path}")
+        return
+
+    traj_data = {
+        "model": model_name,
+        "quant": quant,
+        "version": version,
+        "temperature": temperature,
+        "scenario_id": sid,
+        "score": row["score"],
+        "terminal": row["terminal"],
+        "escalation_level": row.get("escalation_level"),
+        "hierarchy_level": row["hierarchy_level"],
+        "checks": row["checks"],
+        "check_output": row["check_output"],
+        "test_results": row["test_results"],
+        "changed_paths": row["changed_paths"],
+        "unexpected_changes": row["unexpected_changes"],
+        "messages": row["messages"],
+        "elapsed_s": row["elapsed_s"],
+        "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
+    }
+
+    traj_path.parent.mkdir(parents=True, exist_ok=True)
+    traj_path.write_text(
+        json.dumps(traj_data, indent=2, ensure_ascii=True),
+        encoding="utf-8",
+    )
+    eprint(f"  trajectory: {traj_path.resolve()}")
 
 
 def eprint(*args: object, **kwargs: object) -> None:
@@ -106,6 +174,16 @@ def main() -> None:
         help="Scenario ID to run; repeat to select multiple",
     )
     parser.add_argument("--output", type=Path, default=Path("log/bash_pilot.json"))
+    parser.add_argument("--trajectory-dir", type=Path, default=None,
+                        help="Directory to save per-scenario trajectories "
+                             "(default: None, no trajectory saving)")
+    parser.add_argument("--version", default="unknown",
+                        help="Version label for this optimization pass "
+                             "(e.g. v8, v9; stored in trajectory metadata)")
+    parser.add_argument("--force", action="store_true",
+                        help="Overwrite existing trajectory files")
+    parser.add_argument("--ctx-size", type=int, default=32768,
+                        help="Context size for llama-server (default: 32768)")
     parser.add_argument("--docker-image", default="local-os/default:latest")
     parser.add_argument("--timeout-s", type=float, default=180.0)
     parser.add_argument("--max-tokens", type=int, default=1024)
@@ -122,7 +200,7 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    local = args.model.startswith("./")
+    local = args.model.startswith("./") or args.model.endswith(".gguf")
     if not local and not args.base_url:
         parser.error("--base-url is required unless --model starts with ./")
     if args.concurrency < 1:
@@ -140,6 +218,7 @@ def main() -> None:
     server = (
         local_llama_server(
             model=args.model,
+            ctx_size=args.ctx_size,
             startup_timeout_s=min(args.timeout_s, 120.0),
         )
         if local
@@ -147,6 +226,7 @@ def main() -> None:
     )
 
     rows: list[dict[str, object]] = []
+    model_name, quant = _parse_model_path(args.model)
     with server as base_url:
         transport = _setup_transport(args, base_url)
 
@@ -174,6 +254,11 @@ def main() -> None:
                     f"{scenario.id} | {scenario.title}",
                 )
                 row = run_scenario(scenario, harness, transport)
+                _save_trajectory(row, trajectory_dir=args.trajectory_dir,
+                                 model_name=model_name, quant=quant,
+                                 version=args.version,
+                                 temperature=args.temperature,
+                                 force=args.force)
                 rows.append(row)
         else:
             # Concurrent path — assign scenarios to worker threads
@@ -207,7 +292,13 @@ def main() -> None:
                             "error": str(exc),
                         })
                     else:
-                        rows.append(future.result())
+                        row = future.result()
+                        _save_trajectory(row, trajectory_dir=args.trajectory_dir,
+                                         model_name=model_name, quant=quant,
+                                         version=args.version,
+                                         temperature=args.temperature,
+                                         force=args.force)
+                        rows.append(row)
                     completed += 1
                     eprint(f"  [{completed}/{total}]")
 

@@ -15,6 +15,7 @@ from urllib import error, request
 def local_llama_server(
     *,
     model: str,
+    ctx_size: int = 32768,
     startup_timeout_s: float = 60.0,
 ) -> Iterator[str]:
     model_path = Path(model).resolve()
@@ -24,6 +25,7 @@ def local_llama_server(
     script = Path(__file__).resolve().parents[1] / "scripts" / "start_llama_server.sh"
     env = dict(os.environ)
     env["PORT"] = str(port)
+    env["CTX_SIZE"] = str(ctx_size)
     log = tempfile.TemporaryFile(mode="w+")
     process = subprocess.Popen(
         [str(script), str(model_path)],
