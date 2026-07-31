@@ -15,7 +15,7 @@ from urllib import error, request
 def local_llama_server(
     *,
     model: str,
-    ctx_size: int = 32768,
+    ctx_size: int = 65536,
     startup_timeout_s: float = 60.0,
 ) -> Iterator[str]:
     model_path = Path(model).resolve()

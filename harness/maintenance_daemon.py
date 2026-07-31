@@ -72,9 +72,12 @@ class EscalationStore:
     def _read(self) -> list[dict[str, Any]]:
         if not self.path.is_file():
             return []
-        data = json.loads(self.path.read_text(encoding="utf-8"))
+        try:
+            data = json.loads(self.path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            return []
         if not isinstance(data, list):
-            raise ValueError(f"escalation store must contain a JSON array: {self.path}")
+            return []
         return [dict(item) for item in data if isinstance(item, dict)]
 
     def _write(self, active: list[dict[str, Any]]) -> None:

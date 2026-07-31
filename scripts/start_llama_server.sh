@@ -19,8 +19,8 @@ if [[ ! -f "${MODEL_PATH}" ]]; then
 fi
 
 SPEC_ARGS=()
-if [[ "${MODEL_PATH}" == *"Qwen3.5-2B"* && "${MODEL_PATH}" == *"MTP"* ]]; then
-  SPEC_ARGS=(--spec-type draft-mtp --spec-draft-n-max 1)
+if [[ "${MODEL_PATH}" == *"Qwen3.5"* && "${MODEL_PATH}" == *"MTP"* ]]; then
+  SPEC_ARGS=(--spec-type draft-mtp --spec-draft-n-max 2)
 fi
 
 exec llama-server \

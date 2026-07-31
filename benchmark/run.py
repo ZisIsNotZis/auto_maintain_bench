@@ -182,7 +182,7 @@ def main() -> None:
                              "(e.g. v8, v9; stored in trajectory metadata)")
     parser.add_argument("--force", action="store_true",
                         help="Overwrite existing trajectory files")
-    parser.add_argument("--ctx-size", type=int, default=32768,
+    parser.add_argument("--ctx-size", type=int, default=65536,
                         help="Context size for llama-server (default: 32768)")
     parser.add_argument("--docker-image", default="local-os/default:latest")
     parser.add_argument("--timeout-s", type=float, default=180.0)
