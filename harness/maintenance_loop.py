@@ -141,11 +141,47 @@ class MaintenanceLoop:
             response = self.transport.complete(
                 messages=messages,
                 tools=[self.bash_tool],
-                tool_choice="required",
+                tool_choice="auto",
             )
-            content = str(response.get("content", "") or "")
+            content = str(response.get("content", "") or "").strip()
             reasoning_content = str(response.get("reasoning_content", "") or "")
             calls = response.get("tool_calls") or []
+
+            # Check for terminal message in text content first (message protocol)
+            terminal_msg = _terminal_message(content)
+            if terminal_msg is not None:
+                kind, level, message = terminal_msg
+                if kind == "everything_ok" and telemetry_actionable and not executed_commands:
+                    tel_dir = (
+                        self.telemetry_display_dir
+                        or str(self.telemetry_archive.root.resolve())
+                    )
+                    additions = [
+                        _assistant_text_message(content, reasoning_content),
+                        {
+                            "role": "user",
+                            "content": (
+                                f"everything_ok rejected because actionable telemetry "
+                                f"indicates unresolved issues. Check the latest telemetry "
+                                f"at `{tel_dir}/latest.json` before calling everything_ok."
+                            ),
+                        },
+                    ]
+                    messages.extend(additions)
+                    audit_messages.extend(additions)
+                    continue
+                return WakeupResult(
+                    terminal=kind,
+                    message=message,
+                    escalation_level=level,
+                    escalation_id=_escalation_id(level, message),
+                    messages=tuple(audit_messages) + (
+                        _assistant_text_message(content, reasoning_content),
+                    ),
+                    telemetry_path=telemetry_path,
+                )
+
+            # No terminal message — require a bash tool call
             if len(calls) != 1 or not isinstance(calls[0], ToolCall) or calls[0].name != "bash":
                 consecutive_parse_failures += 1
                 if consecutive_parse_failures >= 3:
@@ -166,10 +202,9 @@ class MaintenanceLoop:
                     {
                         "role": "user",
                         "content": (
-                            "Your previous response did not contain exactly one parsed bash "
-                            "tool call. Call bash exactly once now. Use ordinary bash to inspect "
-                            "or repair, everything_ok after fresh verification, or escalate when "
-                            "safe autonomous handling cannot continue."
+                            "Your previous response did not contain a bash tool call. "
+                            "Call bash exactly once now. Use ordinary bash to inspect "
+                            "or repair. When done, output a terminal message (everything_ok or delegate)."
                         ),
                     },
                 ]
@@ -282,30 +317,6 @@ class MaintenanceLoop:
                         messages=tuple(audit_messages),
                         telemetry_path=telemetry_path,
                     )
-            wrapped_control = _wrapped_terminal_control(command)
-            if wrapped_control is not None:
-                additions = [
-                    _assistant_tool_message(call, content, reasoning_content),
-                    _tool_message(
-                        call.id,
-                        BashResult(
-                            2,
-                            "",
-                            "wrapped daemon control rejected without execution",
-                        ),
-                    ),
-                    {
-                        "role": "user",
-                        "content": (
-                            "That command was not executed. Do not print or shell-wrap a daemon "
-                            f"control. Call the bash tool with the bare control value exactly "
-                            f"`{wrapped_control}`."
-                        ),
-                    },
-                ]
-                messages.extend(additions)
-                audit_messages.extend(additions)
-                continue
             reread_warning = self._context_reread_warning(command)
             if reread_warning is not None:
                 consecutive_rereads += 1
@@ -1106,44 +1117,59 @@ def _iter_cp_pairs(parts: list[str]) -> list[tuple[str, str]]:
     return pairs
 
 
-def _terminal_command(command: str) -> tuple[str, str | None, str] | None:
-    try:
-        parts = shlex.split(command)
-    except ValueError:
+def _terminal_message(text: str) -> tuple[str, str | None, str] | None:
+    """Parse a terminal signal from the model's text response (message protocol)."""
+    if not text:
         return None
-    if not parts:
-        return None
-    terminal_name = _terminal_name(parts[0])
-    if terminal_name in {"everything_ok", "yield"} and len(parts) == 1:
+    stripped = text.strip()
+    # everything_ok — must be exactly that, possibly with whitespace
+    if stripped == "everything_ok":
         return ("everything_ok", None, "")
-    if terminal_name != "escalate":
-        return None
-    if len(parts) < 3:
-        return None
-    level = parts[1]
-    message = " ".join(parts[2:]).strip()
-    if level == "none":
-        return ("escalate_none", "none", message)
-    if level not in ESCALATION_LEVELS or not message:
-        return None
-    return ("escalate", level, message)
+    # delegate <level> <message> — hand off to a human operator
+    if stripped.startswith("delegate "):
+        return _parse_delegate_terminal(stripped)
+    return None
 
 
-def _wrapped_terminal_control(command: str) -> str | None:
-    try:
-        parts = shlex.split(command)
-    except ValueError:
+def _terminal_command(command: str) -> tuple[str, str | None, str] | None:
+    """Detect terminal signals in bash commands.
+
+    The model may terminate via:
+    - bare 'everything_ok' or 'delegate <level> <message>' as a bash command
+    - echo "everything_ok" or echo "delegate <level> <message>"
+    """
+    if not command:
         return None
-    if not parts or _terminal_name(parts[0]) not in {"echo", "printf", "bash", "sh", "sudo"}:
-        return None
-    for index, part in enumerate(parts[1:], start=1):
-        terminal = _terminal_name(part)
-        if terminal in {"everything_ok", "yield"}:
-            return "everything_ok"
-        if terminal == "escalate":
-            return " ".join(parts[index:])
-        if part.startswith("escalate "):
-            return part
+    stripped = command.strip()
+    # Strip surrounding quotes in case it's "everything_ok" or 'everything_ok'
+    unquoted = stripped.strip("\"'")
+    if unquoted == "everything_ok":
+        return ("everything_ok", None, "")
+    # echo everything_ok, echo "everything_ok", ECHO "everything_ok"
+    lower = stripped.lower()
+    if lower.startswith("echo "):
+        echoed = stripped[5:].strip().strip("\"'")
+        if echoed == "everything_ok":
+            return ("everything_ok", None, "")
+        if echoed.startswith("delegate "):
+            return _parse_delegate_terminal(echoed)
+    # Direct delegate command
+    if stripped.startswith("delegate "):
+        return _parse_delegate_terminal(stripped)
+    return None
+
+
+def _parse_delegate_terminal(text: str) -> tuple[str, str | None, str] | None:
+    """Parse 'delegate <level> <message>' from text."""
+    rest = text[len("delegate "):].strip()
+    parts = rest.split(None, 1)
+    if len(parts) >= 1:
+        level = parts[0]
+        message = parts[1] if len(parts) >= 2 else ""
+        if level == "none":
+            return ("escalate_none", "none", message)
+        if level in ESCALATION_LEVELS and message:
+            return ("escalate", level, message)
     return None
 
 

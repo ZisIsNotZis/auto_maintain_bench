@@ -26,13 +26,20 @@ class ScriptedTransport:
 
     def complete(self, **_: object) -> dict[str, object]:
         self.calls += 1
+        command = next(self.commands)
+        # Terminal messages should be in text content, not as tool calls
+        if command in ("everything_ok",) or command.startswith("delegate "):
+            return {
+                "content": command,
+                "tool_calls": [],
+            }
         return {
             "content": "",
             "tool_calls": [
                 ToolCall(
                     id=f"call-{self.calls}",
                     name="bash",
-                    arguments={"command": next(self.commands)},
+                    arguments={"command": command},
                 )
             ],
         }
@@ -149,7 +156,7 @@ class BashSandboxBenchmarkTests(unittest.TestCase):
 
     def test_expected_safe_escalation_scores_preservation_and_terminal(self) -> None:
         transport = ScriptedTransport(
-            ["escalate blocked destructive database request requires approval"]
+            ["delegate blocked destructive database request requires approval"]
         )
         scenario = replace(
             self.scenarios["CPU-001"],

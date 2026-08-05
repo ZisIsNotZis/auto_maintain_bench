@@ -32,10 +32,10 @@ def _parse_model_path(model: str) -> tuple[str, str]:
     """Parse model path into (model_name, quant).
 
     Local GGUF: 'Qwen3.5-2B-UD-Q4_K_XL.gguf' → ('Qwen3.5-2B-UD', 'Q4_K_XL')
-    Remote: 'tiny-model' → ('tiny-model', 'unknown')
+    Remote: 'Qwen3.5-2B-UD' → ('Qwen3.5-2B-UD', 'unknown')
     """
-    path = Path(model)
-    stem = path.stem  # removes .gguf
+    # Strip .gguf extension if present (for local file paths)
+    stem = model[:-5] if model.endswith(".gguf") else model
     parts = stem.split("-")
     if len(parts) >= 2 and ("K_" in parts[-1] or "I" in parts[-1] or "IQ" in parts[-1]):
         # Looks like a quant suffix
@@ -45,6 +45,34 @@ def _parse_model_path(model: str) -> tuple[str, str]:
         model_name = stem
         quant = "unknown"
     return model_name, quant
+
+
+def _trajectory_path(
+    *,
+    trajectory_dir: Path,
+    model_name: str,
+    quant: str,
+    version: str,
+    scenario_id: str,
+    temperature: float,
+) -> Path:
+    """Build the trajectory path: <dir>/<model_name>/<quant>/<version>/<sid>/t<temp>.json."""
+    temp_str = f"t{temperature}".replace(".", "_")
+    return (
+        trajectory_dir
+        / model_name
+        / quant
+        / version
+        / str(scenario_id)
+        / f"{temp_str}.json"
+    )
+
+
+def _is_completed(*, scenario_id: str, force: bool, **kwargs: object) -> bool:
+    """True if a trajectory already exists for this scenario and force is off."""
+    if force:
+        return False
+    return _trajectory_path(scenario_id=scenario_id, **kwargs).exists()
 
 
 def _save_trajectory(
@@ -58,10 +86,15 @@ def _save_trajectory(
     force: bool,
 ) -> None:
     """Save a scenario trajectory to disk. Skip if already exists unless force."""
-    # Build path: <dir>/<model_name>/<quant>/<version>/<scenario_id>/<temp>.json
     sid = str(row["scenario_id"])
-    temp_str = f"t{temperature}".replace(".", "_")
-    traj_path = trajectory_dir / model_name / quant / version / sid / f"{temp_str}.json"
+    traj_path = _trajectory_path(
+        trajectory_dir=trajectory_dir,
+        model_name=model_name,
+        quant=quant,
+        version=version,
+        scenario_id=sid,
+        temperature=temperature,
+    )
 
     if traj_path.exists() and not force:
         eprint(f"  trajectory exists, skipping: {traj_path}")
@@ -177,7 +210,7 @@ def main() -> None:
     parser.add_argument("--trajectory-dir", type=Path, default=None,
                         help="Directory to save per-scenario trajectories "
                              "(default: None, no trajectory saving)")
-    parser.add_argument("--version", default="unknown",
+    parser.add_argument("--version", default="v9",
                         help="Version label for this optimization pass "
                              "(e.g. v8, v9; stored in trajectory metadata)")
     parser.add_argument("--force", action="store_true",
@@ -253,12 +286,24 @@ def main() -> None:
                     f"[scenario {index}/{total}] "
                     f"{scenario.id} | {scenario.title}",
                 )
+                if args.trajectory_dir is not None and _is_completed(
+                    scenario_id=scenario.id,
+                    trajectory_dir=args.trajectory_dir,
+                    model_name=model_name,
+                    quant=quant,
+                    version=args.version,
+                    temperature=args.temperature,
+                    force=args.force,
+                ):
+                    eprint(f"  trajectory exists, skipping: {scenario.id}")
+                    continue
                 row = run_scenario(scenario, harness, transport)
-                _save_trajectory(row, trajectory_dir=args.trajectory_dir,
-                                 model_name=model_name, quant=quant,
-                                 version=args.version,
-                                 temperature=args.temperature,
-                                 force=args.force)
+                if args.trajectory_dir is not None:
+                    _save_trajectory(row, trajectory_dir=args.trajectory_dir,
+                                     model_name=model_name, quant=quant,
+                                     version=args.version,
+                                     temperature=args.temperature,
+                                     force=args.force)
                 rows.append(row)
         else:
             # Concurrent path — assign scenarios to worker threads
@@ -266,6 +311,19 @@ def main() -> None:
             with ThreadPoolExecutor(max_workers=args.concurrency) as pool:
                 futures = {}
                 for index, scenario in enumerate(scenarios):
+                    if args.trajectory_dir is not None and _is_completed(
+                        scenario_id=scenario.id,
+                        trajectory_dir=args.trajectory_dir,
+                        model_name=model_name,
+                        quant=quant,
+                        version=args.version,
+                        temperature=args.temperature,
+                        force=args.force,
+                    ):
+                        eprint(
+                            f"  trajectory exists, skipping: {scenario.id}",
+                        )
+                        continue
                     h = harnesses[index % len(harnesses)]
                     future = pool.submit(run_scenario, scenario, h, transport)
                     futures[future] = (index + 1, scenario.id, scenario.title)
@@ -293,11 +351,12 @@ def main() -> None:
                         })
                     else:
                         row = future.result()
-                        _save_trajectory(row, trajectory_dir=args.trajectory_dir,
-                                         model_name=model_name, quant=quant,
-                                         version=args.version,
-                                         temperature=args.temperature,
-                                         force=args.force)
+                        if args.trajectory_dir is not None:
+                            _save_trajectory(row, trajectory_dir=args.trajectory_dir,
+                                             model_name=model_name, quant=quant,
+                                             version=args.version,
+                                             temperature=args.temperature,
+                                             force=args.force)
                         rows.append(row)
                     completed += 1
                     eprint(f"  [{completed}/{total}]")

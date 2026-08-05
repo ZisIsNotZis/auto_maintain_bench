@@ -20,7 +20,7 @@ class HarnessArchitectureTests(unittest.TestCase):
     def test_maintenance_contract_is_external_and_minimal(self) -> None:
         contract = load_harness_contract(ROOT / "harness")
 
-        self.assertIn("escalate", contract.system_prompt.lower())
+        self.assertIn("delegate", contract.system_prompt.lower())
         self.assertEqual(contract.bash_tool["function"]["name"], "bash")
         self.assertEqual(
             set(contract.bash_tool["function"]["parameters"]["properties"]),
@@ -32,7 +32,7 @@ class HarnessArchitectureTests(unittest.TestCase):
         prompt = (ROOT / "harness" / "PROMPT.md").read_text(encoding="utf-8")
         self.assertIn("bash only", prompt.lower())
         self.assertIn("everything_ok", prompt)
-        self.assertIn("escalate", prompt)
+        self.assertIn("delegate", prompt)
 
     def test_wakeup_validator_rejects_missing_required_fields(self) -> None:
         telemetry = json.loads(
