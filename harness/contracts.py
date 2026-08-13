@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import json
 from pathlib import Path
 from typing import Any
@@ -11,13 +11,21 @@ class HarnessContract:
     root: Path
     system_prompt: str
     bash_tool: dict[str, Any]
+    knowledge_files: dict[str, str] = field(default_factory=dict)
 
 
 def load_harness_contract(root: Path) -> HarnessContract:
+    knowledge: dict[str, str] = {}
+    knowledge_dir = root / "knowledge"
+    if knowledge_dir.is_dir():
+        for path in sorted(knowledge_dir.rglob("*.md")):
+            relative = "knowledge/" + path.relative_to(knowledge_dir).as_posix()
+            knowledge[relative] = path.read_text(encoding="utf-8").strip()
     return HarnessContract(
         root=root,
         system_prompt=(root / "PROMPT.md").read_text(encoding="utf-8").strip(),
         bash_tool=_load_json(root / "bash_tool.schema.json"),
+        knowledge_files=knowledge,
     )
 def load_grammar(root: Path, name: str) -> str:
     return (root / "schemas" / f"{name}.gbnf").read_text(encoding="utf-8").strip()

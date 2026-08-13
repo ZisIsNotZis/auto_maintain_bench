@@ -148,7 +148,7 @@ class BashScenarioHarness:
         )
         with tempfile.TemporaryDirectory(prefix=f"automaintain-{scenario.id}-") as tmp:
             root = Path(tmp)
-            _materialize_fixture(root, scenario)
+            _materialize_fixture(root, scenario, knowledge_files=self.contract.knowledge_files)
             before = _snapshot(root)
             loop = MaintenanceLoop(
                 transport=transport,
@@ -320,7 +320,11 @@ def _load_test_scripts(scenario_root: Path) -> dict[str, str]:
     return scripts
 
 
-def _materialize_fixture(root: Path, scenario: BashScenario) -> None:
+def _materialize_fixture(
+    root: Path,
+    scenario: BashScenario,
+    knowledge_files: dict[str, str] | None = None,
+) -> None:
     for relative, content in scenario.files.items():
         path = root / relative
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -347,6 +351,11 @@ def _materialize_fixture(root: Path, scenario: BashScenario) -> None:
         if path.is_file():
             path.chmod(path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
     _materialize_test_scripts(root, scenario.test_scripts)
+    if knowledge_files:
+        for relative_path, content in knowledge_files.items():
+            dest = root / relative_path
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.write_text(content, encoding="utf-8")
 
 
 def _materialize_test_scripts(root: Path, test_scripts: dict[str, str]) -> None:
