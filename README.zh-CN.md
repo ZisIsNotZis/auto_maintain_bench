@@ -102,6 +102,12 @@ python3 -m unittest discover -s tests -p 'test_*.py' -v
 
 欢迎贡献确定性场景、明确校验器、sandbox 探针、模型适配器和分析工具。请保持测试不破坏宿主机、避免云端依赖，并说明对分数解释的影响。请先阅读 [CONTRIBUTING.md](CONTRIBUTING.md)、[CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) 和 [SECURITY.md](SECURITY.md)。
 
+Agent 可以协助分类 issue、复现故障、添加确定性场景、运行测试、改进文档和实现已接受的变更；维护者负责审查并合并。当前分类和证据边界见 [`docs/project-status.md`](docs/project-status.md)。
+
+## 版本管理
+
+`v12` 等基准标签表示优化轮次，不代表兼容性保证。每次结果都应保存模型、提示词、运行时环境和提交信息。
+
 ## 📜 许可证
 
 本项目采用 [GNU GPL v3.0](LICENSE) 授权。
