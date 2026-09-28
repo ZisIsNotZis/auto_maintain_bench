@@ -1,11 +1,8 @@
 # Fail Patterns
 
-Checklist of observed model failure patterns. `[x]` = fixed, `[ ]` = active.
-Each entry is self-contained — no global Fixed/Unfixed sections. Track by
-scenario ID.
+Checklist of observed model failure patterns. `[x]` = fixed, `[ ]` = active. Each entry is self-contained — no global Fixed/Unfixed sections. Track by scenario ID.
 
-**Process:** Before debugging a low score, grep this file for the symptom.
-Append evidence to existing entries. Fix by score-impact order.
+**Process:** Before debugging a low score, grep this file for the symptom. Append evidence to existing entries. Fix by score-impact order.
 
 ---
 

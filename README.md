@@ -102,15 +102,11 @@ Ultimately, this could become a trusted evaluation and regression suite for an e
 
 Contributions are welcome, especially deterministic scenarios with explicit validators, sandbox probes, adapters, and analysis tools. Keep tests host-safe, avoid cloud dependencies, and explain effects on score interpretation. Start with [CONTRIBUTING.md](CONTRIBUTING.md), [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md), and [SECURITY.md](SECURITY.md).
 
-Agents can help triage issues, reproduce failures, add deterministic scenarios,
-run tests, improve documentation, and implement accepted changes; maintainers
-review and merge the result. See [`docs/project-status.md`](docs/project-status.md)
-for the current classification and evidence boundary.
+Agents can help triage issues, reproduce failures, add deterministic scenarios, run tests, improve documentation, and implement accepted changes; maintainers review and merge the result. See [`docs/project-status.md`](docs/project-status.md) for the current classification and evidence boundary.
 
 ## Versioning
 
-Benchmark labels such as `v12` identify optimization passes, not compatibility
-guarantees. Keep model, prompt, runtime, and commit metadata with every result.
+Benchmark labels such as `v12` identify optimization passes, not compatibility guarantees. Keep model, prompt, runtime, and commit metadata with every result.
 
 ## 📜 License
 

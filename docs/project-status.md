@@ -2,9 +2,7 @@
 
 ## Classification
 
-**Innovative, research prototype.** The repository provides a deterministic,
-observable benchmark for tiny language models performing bounded Linux
-maintenance tasks. It is not a production auto-remediation service.
+**Innovative, research prototype.** The repository provides a deterministic, observable benchmark for tiny language models performing bounded Linux maintenance tasks. It is not a production auto-remediation service.
 
 ## Evidence
 
@@ -18,14 +16,8 @@ maintenance tasks. It is not a production auto-remediation service.
 
 ## Version and reproducibility
 
-The benchmark uses version labels such as `v12` for optimization passes rather
-than a packaged release version. Record model, prompt, temperature, concurrency,
-Docker image, host resources, and commit with each comparable run. The canonical
-run command and current methodology are in `CLAUDE.md` and `README.md`.
+The benchmark uses version labels such as `v12` for optimization passes rather than a packaged release version. Record model, prompt, temperature, concurrency, Docker image, host resources, and commit with each comparable run. The canonical run command and current methodology are in `CLAUDE.md` and `README.md`.
 
 ## Paper and media
 
-The repository has research notes but no complete paper package or approved
-video artifact. A paper outline, evidence map, screenshot, or video plan should
-be prepared manually once claims and baselines are stable; nothing is uploaded
-to arXiv or Bilibili by this repository update.
+The repository has research notes but no complete paper package or approved video artifact. A paper outline, evidence map, screenshot, or video plan should be prepared manually once claims and baselines are stable; nothing is uploaded to arXiv or Bilibili by this repository update.
