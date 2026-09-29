@@ -3,7 +3,7 @@
 <p align="center">一个让小型语言模型通过 bash 诊断并维护 Linux 主机的确定性基准。</p>
 <p align="center"><a href="README.md">English</a> · <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0-blue.svg" alt="GPL-3.0 许可证"></a> <a href="https://www.python.org/"><img src="https://img.shields.io/badge/python-3.10%2B-3776AB.svg" alt="Python 3.10+"></a> <img src="https://img.shields.io/badge/CI-未配置-lightgrey.svg" alt="未配置 CI"></p>
 
-> **状态：研究原型。** 当前 harness 和场景库适合可重复实验，但不是生产级自动修复守护进程。
+> **状态：已收口（里程碑，2026-09-29）。** harness 和场景库已达到可用的研究里程碑。不再继续开发；未来可能转入 [Help Agent](https://github.com/ZisIsNotZis/helpagent)，后者可能取代本基准。
 
 ## ⚡ 30 秒了解
 

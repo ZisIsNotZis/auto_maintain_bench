@@ -2,7 +2,14 @@
 
 ## Classification
 
-**Innovative, research prototype.** The repository provides a deterministic, observable benchmark for tiny language models performing bounded Linux maintenance tasks. It is not a production auto-remediation service.
+**Research prototype (closed milestone).** The repository provides a deterministic, observable benchmark for tiny language models performing bounded Linux maintenance tasks. It was never a production auto-remediation service.
+
+## Status
+
+Closed as a milestone (2026-09-29). The corpus and harness reached a usable
+research state; no active development is planned. Future work may continue in
+[Help Agent](https://github.com/ZisIsNotZis/helpagent), which may supersede this
+benchmark.
 
 ## Evidence
 
@@ -18,6 +25,8 @@
 
 The benchmark uses version labels such as `v12` for optimization passes rather than a packaged release version. Record model, prompt, temperature, concurrency, Docker image, host resources, and commit with each comparable run. The canonical run command and current methodology are in `CLAUDE.md` and `README.md`.
 
-## Paper and media
+## Deferred
 
-The repository has research notes but no complete paper package or approved video artifact. A paper outline, evidence map, screenshot, or video plan should be prepared manually once claims and baselines are stable; nothing is uploaded to arXiv or Bilibili by this repository update.
+A complete paper package, approved video artifact, and stable packaged release
+(version labels such as `v12` are optimization passes, not releases) were left
+undone.

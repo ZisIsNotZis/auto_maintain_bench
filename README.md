@@ -3,7 +3,10 @@
 <p align="center">A deterministic benchmark for tiny language models that diagnose and maintain Linux hosts through bash.</p>
 <p align="center"><a href="README.zh-CN.md">简体中文</a> · <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0-blue.svg" alt="GPL-3.0 license"></a> <a href="https://www.python.org/"><img src="https://img.shields.io/badge/python-3.10%2B-3776AB.svg" alt="Python 3.10+"></a> <img src="https://img.shields.io/badge/CI-not%20configured-lightgrey.svg" alt="CI not configured"></p>
 
-> **Status: research prototype.** The harness and scenario corpus support repeatable experiments, but this is not a production auto-remediation daemon.
+> **Status: closed (milestone, 2026-09-29).** The harness and scenario corpus
+> reached a usable research milestone. No further development is planned; future
+> work may continue in [Help Agent](https://github.com/ZisIsNotZis/helpagent),
+> which may supersede this benchmark.
 
 ## ⚡ In 30 seconds
 
