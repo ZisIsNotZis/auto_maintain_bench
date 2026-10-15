@@ -21,12 +21,12 @@
 
 ## 🚀 快速开始
 
-前置条件：Python **3.10+**、Docker，以及 `llama-server`（或兼容 OpenAI 风格接口的服务）。仓库中的 `Qwen*.gguf` 是本机符号链接；克隆后请准备自己的模型文件。
+前置条件：Python **3.10+**、Docker，以及 `llama-server`（或兼容 OpenAI 风格接口的服务）。仓库不附带模型权重；请提供本地 GGUF 模型文件，或使用兼容的服务接口。
 
 ```bash
 git clone https://github.com/ZisIsNotZis/auto_maintain_bench.git
 cd auto_maintain_bench
-python3 benchmark/run.py --model ./Qwen3.5-0.8B-UD-Q4_K_XL.gguf \
+python3 benchmark/run.py --model /path/to/model.gguf \
   --scenario CPU-001 --output /tmp/auto-maintain-cpu.json
 ```
 

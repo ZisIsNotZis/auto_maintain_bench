@@ -24,12 +24,12 @@ It asks: *Can a small local model diagnose the host, make the smallest safe chan
 
 ## 🚀 Quick start
 
-Prerequisites: Python **3.10+**, Docker, and a `llama-server` binary (or compatible OpenAI-style endpoint). The checked-in `Qwen*.gguf` entries are machine-local symlinks; bring your own model files after cloning.
+Prerequisites: Python **3.10+**, Docker, and a `llama-server` binary (or compatible OpenAI-style endpoint). Model weights are not included; supply a local GGUF file or use a compatible endpoint.
 
 ```bash
 git clone https://github.com/ZisIsNotZis/auto_maintain_bench.git
 cd auto_maintain_bench
-python3 benchmark/run.py --model ./Qwen3.5-0.8B-UD-Q4_K_XL.gguf \
+python3 benchmark/run.py --model /path/to/model.gguf \
   --scenario CPU-001 --output /tmp/auto-maintain-cpu.json
 ```
 
