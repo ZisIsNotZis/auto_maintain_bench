@@ -16,9 +16,12 @@ Trace/trajectory/log output should live under `/tmp` or `auto_maintain_bench/log
 ## Benchmark reference docs
 
 - `scenario_catalog.md` — scenario inventory and category coverage.
+- `project-status.md` — classification, evidence boundary, and deferred deliverables.
+- `TELEMETRY.md` — telemetry design spec (fields, trend formats, highlight extraction).
+- `brainstorm.md`, `future_trigger_engine.md` — design notes and future ideas, not current behavior.
 - The scoring model is implemented in `harness/bash_sandbox_benchmark.py` and summarized in `README.md`.
 - `FAIL_PATTERNS.md` — checklist of model failure modes with fix traces.
-- `TELEMETRY.md` — telemetry design spec (fields, trend formats, highlight extraction).
+- `../benchmark/reports/cross_model_comparison.md` — dated per-scenario comparison of 0.8B and 2B quantizations.
 
 ## ADRs
 
