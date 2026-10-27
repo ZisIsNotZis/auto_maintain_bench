@@ -434,7 +434,7 @@ def _score_hierarchy(
     unexpected: tuple[str, ...],
     test_results: dict[str, bool],
 ) -> tuple[float, str]:
-    """Score using the 9-level outcome hierarchy.
+    """Score using the 11-level outcome hierarchy.
 
     Hierarchy (best to worst):
       permanent_fix (1.00): fix + regression + durability all pass, everything_ok
