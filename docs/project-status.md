@@ -13,7 +13,7 @@ benchmark.
 
 ## Evidence
 
-- The corpus currently contains 184 scenario definitions in 19 categories.
+- The corpus currently contains 172 scenario projects in 18 categories.
 - The harness scores fix, durability, safety, and terminal behavior without an
   LLM judge.
 - The standard-library tests cover harness behavior and architecture; Docker
