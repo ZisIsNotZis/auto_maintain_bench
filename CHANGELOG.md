@@ -116,7 +116,7 @@ attempted a repair. If you haven't, investigate further."
 (+6), everything_ok unchanged (22). The softer guidance preserves the constraint
 on false success without triggering escalation bias.
 
-**Files:** `harness/PROMPT.md` (Step 8), `docs/FAIL_PATTERNS.md`, `CLAUDE.md`
+**Files:** `harness/PROMPT.md` (Step 8), `docs/FAIL_PATTERNS.md`, `AGENTS.md`
 
 ---
 

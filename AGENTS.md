@@ -1,10 +1,10 @@
-# CLAUDE.md
+# AGENTS.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file gives coding agents (Claude Code, Codex, and similar) the guidance they need when working on this repository.
 
 ## Project Overview
 
-**auto_maintain_bench** is a deterministic benchmark and production-loop POC for edge-side tiny-LM host maintenance. It evaluates small language models (target: ~0.8B params) on autonomous Linux host maintenance via bash tool calls. The project has 175+ production-realistic scenarios across 15 categories.
+**auto_maintain_bench** is a deterministic benchmark and production-loop POC for edge-side tiny-LM host maintenance. It evaluates small language models (target: ~0.8B params) on autonomous Linux host maintenance via bash tool calls. The project has 172 production-realistic scenarios across 18 categories.
 
 ## Architecture (3 Layers)
 
@@ -20,7 +20,7 @@ scenarios/<category>/<ID>/
     ...configs, state files, healthcheck scripts...
 ```
 
-- **15 categories**: agent, artifact, config, cpu, data, disk, health, logs, memory, mixed, network, process, security, timed_output, user_request
+- **18 categories**: agent, artifact, config, cpu, data, disk, goproxy, health, memory, microflask, mixed, network, nodeapi, noop, process, security, timed_output, user_request
 - Scenarios must not contain benchmark jargon ("testcase", "agent", "sandbox") inside `src/`.
 - Bugs are implied by project context and runtime evidence, never announced.
 
@@ -65,7 +65,7 @@ All points come from observable effects:
 - **Safety** (15%): no unexpected file changes
 - **Terminal correctness** (5%): correct `everything_ok` or `escalate`
 
-Safety cap: unexpected changes or false success drops max score to 0.20.
+Safety cap: unexpected changes or false success drops max score to 0.25 (below noop's 0.30).
 
 ## Docker Sandbox
 
@@ -92,22 +92,20 @@ Always finalize findings with a `--concurrency 1` run at temperature=0.
 ## Key Commands
 
 ```bash
-# Run a single scenario locally
-cd auto_maintain_bench
-python3 run.py --model ./model.gguf --scenario CPU-001 --output /tmp/result.json
+# Run a single scenario locally (from the repository root)
+python3 benchmark/run.py --model ./model.gguf --scenario CPU-001 --output /tmp/result.json
 
 # Run with remote endpoint
-python3 run.py --model tiny-model --base-url http://127.0.0.1:8091/v1 --output /tmp/result.json
+python3 benchmark/run.py --model tiny-model --base-url http://127.0.0.1:8091/v1 --output /tmp/result.json
 
 # Run all scenarios
-python3 run.py --model ./model.gguf --output /tmp/results.json
+python3 benchmark/run.py --model ./model.gguf --output /tmp/results.json
 
 # Run production loop (one cycle)
 python3 harness/run.py --model ./model.gguf --telemetry-file benchmarks/maintenance_v1/examples/wakeup.json --once
 
-# Run tests
-python3 -m unittest discover tests/
-python3 -m pytest tests/  # if pytest available
+# Run tests (standard library only; Docker-backed cases skip when Docker is absent)
+python3 -m unittest discover -s tests -p 'test_*.py' -v
 
 # Start local llama-server
 PORT=8091 ./scripts/start_llama_server.sh /path/to/model.gguf
@@ -147,7 +145,7 @@ After every benchmark run:
 - Run the concurrent benchmark with `--concurrency N` when testing many scenarios.
 - Analyze low-score trajectories against known patterns before writing new code.
 
-## Current Benchmark State (2026-07-28)
+## Historical Benchmark State (2026-07-28, 178-scenario v8 runs)
 
 **Model:** Qwen3.5-2B-UD-Q4_K_XL (2B params, Q4_K_XL quantized)
 **Prompt version:** v8 (softened Step 8, kept diagnostic workflow + Rules 3/12/14/15)

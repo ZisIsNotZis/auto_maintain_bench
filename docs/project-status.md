@@ -23,7 +23,7 @@ benchmark.
 
 ## Version and reproducibility
 
-The benchmark uses version labels such as `v12` for optimization passes rather than a packaged release version. Record model, prompt, temperature, concurrency, Docker image, host resources, and commit with each comparable run. The canonical run command and current methodology are in `CLAUDE.md` and `README.md`.
+The benchmark uses version labels such as `v12` for optimization passes rather than a packaged release version. Record model, prompt, temperature, concurrency, Docker image, host resources, and commit with each comparable run. The canonical run command and current methodology are in `AGENTS.md` and `README.md`.
 
 ## Deferred
 
