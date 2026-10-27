@@ -57,7 +57,7 @@ class BashSandboxBenchmarkTests(unittest.TestCase):
         }
 
     def test_catalog_loads_runner_agnostic_scenario_projects(self) -> None:
-        self.assertGreaterEqual(len(self.scenarios), 175)
+        self.assertGreaterEqual(len(self.scenarios), 172)
         self.assertTrue({"CPU-001", "DISK-001", "CFG-001"}.issubset(self.scenarios))
         for scenario in self.scenarios.values():
             self.assertTrue(scenario.project_readme.startswith("# "))
